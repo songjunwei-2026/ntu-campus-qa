@@ -1,0 +1,41 @@
+# ---- 密钥：绝对不能提交 ----
+config.json
+
+# ---- 语料：学校官网抓取内容，仅本地自用，不随仓库分发 ----
+corpus/chunks.jsonl
+corpus/docs_final.jsonl
+corpus/web_chunks.jsonl
+corpus/web_seen.json
+corpus/dedup_report.json
+corpus/stats.json
+
+# ---- 地图底图：高德瓦片拼接，再分发不合规，请自行准备 ----
+web/assets/campus.webp
+web/assets/campus-plan.webp
+
+# ---- 运行时产物 ----
+__pycache__/
+*.pyc
+*.log
+misses.jsonl
+web_cache.jsonl
+web_cache.jsonl.bak-*
+
+# ---- 二维码含本机 IP ----
+qr_lan.png
+web/assets/qr_share.png
+
+# ---- 浏览器调试目录 ----
+edge-verify/
+edge-profile-static/
+
+# ---- 临时截图 ----
+tools/newcap.png
+shot_*.png
+
+# ---- 一次性启动文档（需求草稿与搭建指令，不进仓库）----
+PROMPT_WEBSITE.md
+START.md
+从这里开始.txt
+开始工作.md
+方案确认.md
