@@ -83,13 +83,37 @@ def _extract_snippet(question, text, limit=3):
     for idx, sentence in enumerate(sentences):
         char_hits = sum(sentence.count(term) for term in unique_terms)
         pair_hits = sum(sentence.count(pair) for pair in bigrams)
+        priority = 0
+        if re.search(r"申请条件|条件|金额|多少钱|比例|多少", question):
+            priority += len(NUM_UNIT.findall(sentence)) * 12
+        if re.search(r"处分|哪几种|类型", question):
+            priority += sum(sentence.count(x) for x in ("警告", "严重警告", "记过", "留校察看", "开除学籍")) * 10
         # 以相邻二元组为主要命中依据，避免短的泛化条款压过真正相关的长句。
-        density = char_hits + pair_hits * 3
+        density = char_hits + pair_hits * 3 + priority
         scored.append((density, char_hits + pair_hits, idx))
 
     positive = [item for item in scored if item[1] > 0]
     chosen = sorted((positive or scored), key=lambda item: (-item[0], -item[1], item[2]))[:limit]
     chosen_idx = sorted(item[2] for item in chosen)
+    if re.search(r"申请条件|条件|金额|多少钱|比例|多少", question):
+        numeric = []
+        for idx, sentence in enumerate(sentences):
+            matches = NUM_UNIT.findall(sentence)
+            if not matches:
+                continue
+            values = []
+            for value in matches:
+                m = re.search(r"\d+(?:\.\d+)?", value)
+                if m:
+                    values.append(float(m.group()))
+            # 金额问题优先保留带“元”的句子；其余问题优先保留数字信息最密的句子。
+            money = sum("元" in value for value in matches)
+            numeric.append((money if re.search(r"金额|多少钱", question) else 0,
+                            max(values or [0]), len(matches), idx))
+        if numeric:
+            target = max(numeric, key=lambda item: item[:3])[3]
+            if target not in chosen_idx:
+                chosen_idx = sorted((chosen_idx[:-1] if chosen_idx else []) + [target])
     # 优先给出 2~3 句；极短块则按实际句数返回。
     if len(chosen_idx) == 1 and len(sentences) > 1:
         next_idx = 1 if chosen_idx[0] != 1 else 0
@@ -138,6 +162,37 @@ def _offscope(q, groups):
             if not ("研究生" in g["best"]["chunk"]["title"]
                     and "本科" not in g["best"]["chunk"]["title"])]
     return kept or groups
+
+
+def _intent_mismatch(q, groups):
+    """拦截词面相似但主题不匹配的制度，避免把收费/安全规定当时间表回答。"""
+    if not groups:
+        return False
+    corpus = "\n".join(
+        (g["best"]["chunk"].get("title", "") + "\n" + g.get("text", ""))
+        for g in groups[:4]
+    )
+    # 问"钟点/时刻表"：必须有具体钟点或时间表证据，泛泛出现"时间"不算。
+    if re.search(r"几点|时刻表|开门|关门|开放时间|发车|班次", q):
+        if not (re.search(r"\d{1,2}\s*[:：]\s*\d{2}", corpus)
+                or any(x in corpus for x in ("时刻表", "发车", "班次", "作息时间",
+                                             "开放时间", "开门", "关门", "上课时间"))):
+            return True
+    # 问"什么时候/校历"：学期、月份、受理日期都算证据。
+    # 转专业办法写的是"一年级第一、第二学期"，一个钟点词都没有，
+    # 若与上一组合并判断，这类完全能答的问题会被误拦。
+    if re.search(r"什么时候|什么时间|何时|校历|开学", q):
+        if not re.search(r"第[一二三四1-4]学期|每学年|每学期|\d{1,2}\s*月"
+                         r"|校历|开学|日期|受理|报名", corpus):
+            return True
+    if re.search(r"校车", q) and not any(x in corpus for x in ("校车", "班车", "发车", "班次")):
+        return True
+    if "校历" in q and not re.search(r"校历.{0,30}(开学|上课)|开学.{0,30}校历", corpus):
+        return True
+    if "学费" in q and re.search(r"多少|多少钱|标准", q):
+        if not re.search(r"学费.{0,20}\d+(?:\.\d+)?\s*元", corpus):
+            return True
+    return False
 
 
 MAX_DOC_CHUNKS = 8    # 短文档整篇喂，长文档用命中块 ±2 段
@@ -464,6 +519,13 @@ def answer(q):
 
     hits = R.search(q, top=6)
     groups = _offscope(q, _group_hits(hits))[:MAX_GROUPS]
+    if _intent_mismatch(q, groups):
+        weblearn.log_miss(q, "intent-mismatch")
+        return {"ok": False, "mode": "retrieval", "question": q,
+                "answer": "本地制度中没有收录与这个问题直接对应的内容。",
+                "citations": [],
+                "notice": "建议查询学校最新公告或咨询相关职能部门。",
+                "expanded": [], "places": P}
     if not groups:
         # 本地语料完全没有相关块：先上网找官网证据（比"未涉及"有用得多）
         web = _web_answer(q, P)
@@ -645,8 +707,10 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(200, {
                 "llm": bool(CFG.get("api_key")),
                 "model": CFG.get("model", ""),
-                "docs": STATS.get("文档数", 0),
-                "chunks": STATS.get("切块数", len(R.docs)),
+                # 语料会持续增长，stats.json 是上次切块时的快照；
+                # 以内存里实际的检索库为准，否则页面统计会一直滞后。
+                "docs": len({d.get("doc_uid") for d in R.docs}),
+                "chunks": len(R.docs),
                 "chars": STATS.get("总中文字数", 0),
                 "places": len(campus_places.PLACES),
                 "web_docs": web_docs,

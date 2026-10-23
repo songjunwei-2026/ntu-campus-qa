@@ -13,6 +13,7 @@ import sys, os, argparse
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from rag import Retriever, dept_name
 import llm
+import server as app
 
 
 def main():
@@ -23,6 +24,19 @@ def main():
     a = ap.parse_args()
     q = " ".join(a.question)
 
+    if not a.no_llm:
+        res = app.answer(q)
+        print("=" * 70)
+        print("问题:", q)
+        print("模式:", res.get("mode", "retrieval"))
+        print("答案:", res.get("answer", ""))
+        if res.get("notice"):
+            print("提示:", res["notice"])
+        for c in res.get("citations", []):
+            print("[%d] 依据度 %.0f%% | %s" %
+                  (c["no"], float(c.get("relevance", 0)) * 100, c.get("title", "")))
+        return 0
+
     r = Retriever()
     hits = r.search(q, a.top)
     print("=" * 70)
@@ -30,13 +44,13 @@ def main():
     if not hits:
         print("结果: 现有文件中未涉及这个问题。")
         return 0
-    print("命中: %d 份 | 首条覆盖 %.0f%%%s"
+    print("命中: %d 份 | 首条依据度 %.0f%%%s"
           % (len(hits), hits[0]["coverage"] * 100,
              "" if hits[0]["coverage"] >= 0.45 else "（依据可能不足）"))
     print("=" * 70)
     for i, h in enumerate(hits, 1):
         c = h["chunk"]
-        print("[%d] %.1f  覆盖%.0f%%  %s" % (i, h["score"], h["coverage"] * 100, c["title"][:50]))
+        print("[%d] 综合分%.1f  依据度%.0f%%  %s" % (i, h["score"], h["coverage"] * 100, c["title"][:50]))
         # 手册源的 date 是编印年，不是发布年，不展示；网页源才显示日期
         dept = dept_name(c.get("dept", ""))
         if c.get("source") == "handbook":
@@ -50,19 +64,6 @@ def main():
         print("同义词扩展:", "、".join(hits[0]["expanded"]))
     print()
 
-    cfg = llm.load_config()
-    if a.no_llm:
-        return 0
-    if not cfg.get("api_key"):
-        print("未配置大模型，仅输出检索结果。配置 LLM_API_KEY 后可获得总结答案。")
-        return 0
-
-    print("-" * 70)
-    text = llm.chat(q, r.build_context(hits), cfg)
-    if llm.NO_ANSWER in text:
-        print("现有文件中未涉及这个问题。建议咨询相关职能部门。")
-    else:
-        print(text)
     return 0
 
 

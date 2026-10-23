@@ -72,12 +72,9 @@ def main():
             elapsed = time.time() - t0
 
         if not answerable:
-            if use_llm:
-                t0 = time.time()
-                ok = not server.answer(q)["ok"]
-                elapsed = time.time() - t0
-            else:
-                ok = (not hits) or hits[0]["coverage"] < 0.45
+            t0 = time.time()
+            ok = not server.answer(q)["ok"]
+            elapsed = time.time() - t0
             ref_ok += ok
             total += elapsed
             print("%-24s %-6s %-6s %-6s %s" % (q[:22], "-", "-", "%.1fs" % elapsed if use_llm else "-",
@@ -117,7 +114,11 @@ def main():
             ans = res["answer"] if res["ok"] else ""
             hit_ans = bool(ans) and any(m in ans for m in must)
         else:
-            hit_ans = bool(hits) and any(m in hits[0]["chunk"]["text"] for m in must)
+            t0 = time.time()
+            res = server.answer(q)
+            elapsed = time.time() - t0
+            ans = res["answer"] if res["ok"] else ""
+            hit_ans = bool(ans) and any(m in ans for m in must)
         ans_ok += hit_ans
         total += elapsed
         print("%-24s %-6s %-6s %-6s" % (q[:22], "✓" if hit_doc else "✗",

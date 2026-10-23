@@ -5,13 +5,16 @@ LLM 调用封装（OpenAI 兼容接口，标准库实现，无第三方依赖）
 配置优先级：环境变量 > config.json
   LLM_API_KEY / LLM_BASE_URL / LLM_MODEL
 """
-import os, json, urllib.request
+import os, json, time, urllib.request
 
 BASE = os.path.dirname(os.path.abspath(__file__))
 CONFIG = os.path.join(BASE, "config.json")
 
 # 模型判定"资料答不了"时输出这个标记，服务端据此返回未收录
 NO_ANSWER = "【未收录】"
+
+# 最近一次调用的 token 用量，供 /api/status 与成本排查读取
+LAST_USAGE = {}
 
 SYSTEM_PROMPT = """你是南通大学校园事务助手。只能依据【参考资料】回答，禁止用资料以外的常识补充。
 
@@ -30,7 +33,11 @@ SYSTEM_PROMPT = """你是南通大学校园事务助手。只能依据【参考�
 8. 问题问具体数值/时间，而资料只给了定性规定（例如只写"禁止使用大功率电器"、
    没写多少瓦），就把定性规定答出来并注明资料未写明具体数值——这种情况不要输出【未收录】。
 9. 资料按与问题的相关度从高到低排列。如果资料1已经直接回答了问题（尤其直接给出地点、
-   电话、办理入口这类答案），就以资料1为主答，后面的资料只作补充，不要用后面的内容把它顶掉。"""
+   电话、办理入口这类答案），就以资料1为主答，后面的资料只作补充，不要用后面的内容把它顶掉。
+10. 回答开头必须明确写出用户所问事项的名称，例如“勤工助学申请需要……”“实验室安全要求包括……”，
+    不要用“该项目”“相关活动”“这些要求”等模糊代称替代问题中的核心事项。
+11. 问题包含“条件、要求、流程、材料、金额、时间”等多个要素时，逐项覆盖参考资料中对应内容；
+    资料没有写明的要素要明确说“原文未写明”，不能为了简短而省略。"""
 
 
 def load_config():
@@ -70,14 +77,33 @@ def chat(question, context, cfg=None, timeout=45, web=False):
             {"role": "user", "content": "【参考资料】\n%s\n\n【问题】%s" % (context, question)},
         ],
         "temperature": 0,
-        "max_tokens": 700,
+        # 新模型默认带推理：思考 token 计入 max_tokens，配额吃满时正文会是空的
+        # （实测 max_tokens=700、思考 557 token 时正文只剩 244 字，思考 700 时正文 0 字）。
+        # 问答场景不需要思维链，关掉更快也更稳；旧模型会忽略这个字段。
+        "thinking": {"type": "disabled"},
+        "max_tokens": 1500,
     }
-    req = urllib.request.Request(
-        cfg["base_url"].rstrip("/") + "/chat/completions",
-        data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
-        headers={"Content-Type": "application/json",
-                 "Authorization": "Bearer " + cfg["api_key"]},
-    )
-    with urllib.request.urlopen(req, timeout=timeout) as r:
-        data = json.loads(r.read().decode("utf-8"))
-    return data["choices"][0]["message"]["content"].strip()
+
+    def _post():
+        req = urllib.request.Request(
+            cfg["base_url"].rstrip("/") + "/chat/completions",
+            data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+            headers={"Content-Type": "application/json",
+                     "Authorization": "Bearer " + cfg["api_key"]},
+        )
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            return json.loads(r.read().decode("utf-8"))
+
+    # 偶发返回空正文（配额被思考吃光或被内容策略截断），重试一次再放弃
+    for attempt in (1, 2):
+        data = _post()
+        choice = data["choices"][0]
+        LAST_USAGE.clear()
+        LAST_USAGE.update(data.get("usage") or {})
+        text = (choice["message"].get("content") or "").strip()
+        if text:
+            return text
+        if attempt == 1:
+            time.sleep(0.5)
+            continue
+        raise RuntimeError("模型返回空内容（finish_reason=%s）" % choice.get("finish_reason"))
