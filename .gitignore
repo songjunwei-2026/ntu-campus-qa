@@ -18,6 +18,7 @@ __pycache__/
 *.pyc
 *.log
 misses.jsonl
+feedback.jsonl
 web_cache.jsonl
 web_cache.jsonl.bak-*
 

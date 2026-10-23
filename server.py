@@ -34,6 +34,7 @@ WEB_CHUNKS = os.path.join(BASE, "corpus", "web_chunks.jsonl")
 # 人工核实的事实层：官网结构上抓不到的东西（SPA、附件、410 栏目）
 # 用 add_fact.py 录入，只收有明确出处的内容，宁可空着也不写没核过的
 FACT_CHUNKS = os.path.join(BASE, "corpus", "facts_chunks.jsonl")
+FEEDBACK_PATH = os.path.join(BASE, "feedback.jsonl")
 R = Retriever([os.path.join(BASE, "corpus", "chunks.jsonl"), WEB_CHUNKS, FACT_CHUNKS])
 CFG = llm.load_config()
 STATS = {}
@@ -85,6 +86,14 @@ def _cache_prepare():
 
 def _copy_result(result):
     return json.loads(json.dumps(result, ensure_ascii=False))
+
+
+def _feedback_total():
+    try:
+        with open(FEEDBACK_PATH, encoding="utf-8") as f:
+            return sum(1 for line in f if line.strip())
+    except OSError:
+        return 0
 
 
 def _usage_now():
@@ -836,6 +845,7 @@ class Handler(BaseHTTPRequestHandler):
                 "total_out": _TOTAL_OUT,
                 "avg_in": round(_TOTAL_IN / _USAGE_CALLS, 1) if _USAGE_CALLS else 0,
                 "avg_out": round(_TOTAL_OUT / _USAGE_CALLS, 1) if _USAGE_CALLS else 0,
+                "feedback_total": _feedback_total(),
             })
         if path == "/api/misses":
             return self._send(200, {"items": weblearn.misses(),
@@ -854,7 +864,24 @@ class Handler(BaseHTTPRequestHandler):
         self._send(404, {"error": "not found"})
 
     def do_POST(self):
-        if urlparse(self.path).path != "/api/ask":
+        path = urlparse(self.path).path
+        if path == "/api/feedback":
+            n = int(self.headers.get("Content-Length") or 0)
+            try:
+                body = json.loads(self.rfile.read(n).decode("utf-8"))
+            except Exception:
+                return self._send(400, {"error": "请求体不是合法 JSON"})
+            q = (body.get("q") or "").strip()
+            if not q or len(q) > 200:
+                return self._send(400, {"error": "问题不能为空且不能超过 200 字"})
+            if not isinstance(body.get("citation_titles"), list):
+                return self._send(400, {"error": "citation_titles 必须是列表"})
+            row = {"q": q, "citation_titles": body["citation_titles"],
+                   "reason": str(body.get("reason") or "").strip()}
+            with open(FEEDBACK_PATH, "a", encoding="utf-8") as f:
+                f.write(json.dumps(row, ensure_ascii=False) + "\n")
+            return self._send(200, {"ok": True, "feedback_total": _feedback_total()})
+        if path != "/api/ask":
             return self._send(404, {"error": "not found"})
         n = int(self.headers.get("Content-Length") or 0)
         try:
