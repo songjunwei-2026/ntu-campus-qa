@@ -146,6 +146,24 @@ def _copy_result(result):
     return json.loads(json.dumps(result, ensure_ascii=False))
 
 
+def _feedback_items(limit=200):
+    items = []
+    try:
+        with open(FEEDBACK_PATH, encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    items.append(json.loads(line))
+                except ValueError:
+                    continue
+    except OSError:
+        return []
+    items.reverse()
+    return items[:limit]
+
+
 def _feedback_total():
     try:
         with open(FEEDBACK_PATH, encoding="utf-8") as f:
@@ -915,6 +933,9 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/misses":
             return self._send(200, {"items": weblearn.misses(),
                                     "total": weblearn.stats()["misses"]})
+        if path == "/api/feedback/list":
+            items = _feedback_items()
+            return self._send(200, {"items": items, "total": _feedback_total()})
         if path == "/api/places":
             return self._send(200, {
                 "campus": campus_places.CAMPUS,
@@ -947,7 +968,8 @@ class Handler(BaseHTTPRequestHandler):
             if not isinstance(body.get("citation_titles"), list):
                 return self._send(400, {"error": "citation_titles 必须是列表"})
             row = {"q": q, "citation_titles": body["citation_titles"],
-                   "reason": str(body.get("reason") or "").strip()}
+                   "reason": str(body.get("reason") or "").strip(),
+                   "kind": "answer" if body.get("kind") == "answer" else "wrong"}
             with open(FEEDBACK_PATH, "a", encoding="utf-8") as f:
                 f.write(json.dumps(row, ensure_ascii=False) + "\n")
             return self._send(200, {"ok": True, "feedback_total": _feedback_total()})
