@@ -279,6 +279,21 @@ def _drop_marker(text):
     return (text or "").replace(llm.NO_ANSWER, "").lstrip("：:，,。 ").strip()
 
 
+def _truncate_answer(text, limit=400):
+    """按完整句子限制答案长度，避免在句中硬切。"""
+    text = (text or "").strip()
+    if len(text) <= limit:
+        return text
+    head = text[:limit]
+    positions = [head.rfind(mark) for mark in ("。", "！", "？", "!", "?", "\n")]
+    cut = max(positions)
+    if cut >= 0:
+        return head[:cut + 1].rstrip() + "……"
+    # 没有标点时只保留完整的最后一段，仍不在句中截断。
+    paragraph = head.rsplit("\n", 1)[0].strip()
+    return (paragraph or head).rstrip() + "……"
+
+
 def _place_answer(p, room=None, brief=False):
     """纯位置问题的回答文本（政策语料答不了时，地点本身就是答案）。
 
@@ -486,8 +501,8 @@ def _web_answer(q, places_block, expanded=None, depth=0):
             "ok": False,
             "mode": "web",
             "question": q,
-            "answer": "官网只检索到%s的相关规定，没有啬园校区的对应内容。仅供对照参考：%s" % (
-                other, _drop_marker(text)),
+            "answer": _truncate_answer("官网只检索到%s的相关规定，没有啬园校区的对应内容。仅供对照参考：%s" % (
+                other, _drop_marker(text))),
             "citations": cites,
             "notice": "以上为%s的信息，不能直接套用到啬园校区。" % other,
             "expanded": expanded or [],
@@ -499,7 +514,7 @@ def _web_answer(q, places_block, expanded=None, depth=0):
         "ok": True,
         "mode": "web",
         "question": q,
-        "answer": _drop_marker(text),
+        "answer": _truncate_answer(_drop_marker(text)),
         "citations": cites,
         "notice": notice,
         "expanded": expanded or [],
@@ -586,8 +601,8 @@ def answer(q):
         "ok": True,
         "mode": "retrieval",
         "question": q,
-        "answer": "根据《%s》：%s [1]" % (_display_title(groups[0]["best"]["chunk"]["title"]),
-                                        citations[0]["snippet"]),
+        "answer": _truncate_answer("根据《%s》：%s [1]" % (
+            _display_title(groups[0]["best"]["chunk"]["title"]), citations[0]["snippet"])),
         "citations": citations,
         "notice": "",
         "expanded": groups[0]["best"]["expanded"],
@@ -642,7 +657,7 @@ def answer(q):
         return res
 
     res["mode"] = "llm"
-    res["answer"] = _drop_marker(text)
+    res["answer"] = _truncate_answer(_drop_marker(text))
     return res
 
 
