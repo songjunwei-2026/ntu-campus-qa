@@ -15,6 +15,7 @@
       --dept "图书馆" --url "https://lib.ntu.edu.cn/..." --date "2026-10-21"
 
   python add_fact.py --list          # 看已录入的事实
+  python add_fact.py --edit 关键词 --text "新内容"  # 唯一匹配时更新正文
   python add_fact.py --del 关键词    # 按标题关键词删除
 """
 import hashlib
@@ -82,6 +83,30 @@ def add(title, text, dept, url, date):
     return 0
 
 
+def edit(keyword, text):
+    rows = _read()
+    matches = [r for r in rows if keyword and keyword in r.get("title", "")]
+    if not matches:
+        print("× 未找到标题包含“%s”的事实" % keyword)
+        return 1
+    if len(matches) > 1:
+        print("× 关键词匹配到多条，请改用更完整的标题：")
+        for r in matches:
+            print("  · %s" % r.get("title", ""))
+        return 1
+    text = (text or "").strip()
+    if not text:
+        print("× 新正文不能为空")
+        return 1
+    row = matches[0]
+    old_len = len(row.get("text", ""))
+    row["text"] = text
+    _write(rows)
+    print("√ 已更新：%s" % row.get("title", ""))
+    print("  字数：%d → %d" % (old_len, len(text)))
+    return 0
+
+
 def main():
     args = sys.argv[1:]
     if not args or args[0] in ("-h", "--help"):
@@ -95,8 +120,18 @@ def main():
         print("共 %d 条：" % len(rows))
         for r in rows:
             print("  · %s\n    出处：%s %s\n    %s" % (
-                r["title"], r.get("dept", ""), r.get("url", ""), r["text"][:60]))
+                r["title"], r.get("dept", ""), r.get("url", ""), r["text"]))
         return 0
+    if args[0] == "--edit":
+        if len(args) < 2:
+            print("× 需要标题关键词，如 --edit 图书馆")
+            return 1
+        keyword = args[1]
+        text = ""
+        if "--text" in args:
+            i = args.index("--text")
+            text = args[i + 1] if i + 1 < len(args) else ""
+        return edit(keyword, text)
     if args[0] == "--del":
         if len(args) < 2:
             print("× 需要关键词，如 --del 图书馆")
