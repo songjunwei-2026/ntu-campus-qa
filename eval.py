@@ -55,8 +55,8 @@ def main():
 
     n_doc = sum(1 for c in CASES if c[3] and c[1])          # 本地语料能检索到
     n_web = sum(1 for c in CASES if c[3] and not c[1])      # 只能靠官网
-    n_ans = n_doc + n_web
-    n_ref = sum(1 for c in CASES if not c[3])
+    n_ans = n_doc + n_web if use_llm else 0
+    n_ref = sum(1 for c in CASES if not c[3]) if use_llm else 0
     doc_ok = ans_ok = ref_ok = src_ok = 0
     total = 0.0
 
@@ -72,12 +72,15 @@ def main():
             elapsed = time.time() - t0
 
         if not answerable:
+            if not use_llm:
+                print("%-24s %-6s %-6s %-6s" % (q[:22], "-", "跳过", "-"))
+                continue
             t0 = time.time()
             ok = not server.answer(q)["ok"]
             elapsed = time.time() - t0
             ref_ok += ok
             total += elapsed
-            print("%-24s %-6s %-6s %-6s %s" % (q[:22], "-", "-", "%.1fs" % elapsed if use_llm else "-",
+            print("%-24s %-6s %-6s %-6s %s" % (q[:22], "-", "-", "%.1fs" % elapsed,
                   "✓ 正确拒答" if ok else "✗ 未拒答 ← " + top_title[:24]))
             continue
 
@@ -114,11 +117,8 @@ def main():
             ans = res["answer"] if res["ok"] else ""
             hit_ans = bool(ans) and any(m in ans for m in must)
         else:
-            t0 = time.time()
-            res = server.answer(q)
-            elapsed = time.time() - t0
-            ans = res["answer"] if res["ok"] else ""
-            hit_ans = bool(ans) and any(m in ans for m in must)
+            print("%-24s %-6s %-6s %-6s" % (q[:22], "✓" if hit_doc else "✗", "跳过", "-"))
+            continue
         ans_ok += hit_ans
         total += elapsed
         print("%-24s %-6s %-6s %-6s" % (q[:22], "✓" if hit_doc else "✗",
@@ -128,10 +128,14 @@ def main():
 
     print("-" * 56)
     print("检索层 首条文件正确 %d/%d (%.0f%%)" % (doc_ok, n_doc, 100 * doc_ok / max(n_doc, 1)))
-    print("答案层 要素齐全   %d/%d (%.0f%%)" % (ans_ok, n_ans, 100 * ans_ok / max(n_ans, 1)))
-    if use_llm and n_web:
-        print("来源层 官网等级达标 %d/%d (%.0f%%)" % (src_ok, n_web, 100 * src_ok / n_web))
-    print("拒答层 正确拒答   %d/%d (%.0f%%)" % (ref_ok, n_ref, 100 * ref_ok / n_ref))
+    if use_llm:
+        print("答案层 要素齐全   %d/%d (%.0f%%)" % (ans_ok, n_ans, 100 * ans_ok / max(n_ans, 1)))
+        if n_web:
+            print("来源层 官网等级达标 %d/%d (%.0f%%)" % (src_ok, n_web, 100 * src_ok / n_web))
+        print("拒答层 正确拒答   %d/%d (%.0f%%)" % (ref_ok, n_ref, 100 * ref_ok / n_ref))
+    else:
+        print("答案层 跳过（加 --llm 才测试）")
+        print("拒答层 跳过（加 --llm 才测试）")
     if use_llm:
         print("总耗时 %.1fs | 单题平均 %.1fs" % (total, total / len(CASES)))
 

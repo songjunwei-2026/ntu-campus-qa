@@ -187,10 +187,21 @@ def _intent_mismatch(q, groups):
             return True
     if re.search(r"校车", q) and not any(x in corpus for x in ("校车", "班车", "发车", "班次")):
         return True
+    # 军训/寒暑假/报到：只有问"时间"且语料没有对应日期时才拦。
+    # 原先写成无条件拦截，会把"军训需要准备什么""寒假留校申请流程"这类
+    # 语料里明明有答案的问题一并拒掉（含"留校"的文档 48 篇、含"军训"45 篇）。
+    m_evt = re.search(r"军训|寒假|暑假|报到", q)
+    if m_evt and re.search(r"什么时候|什么时间|何时|几月|哪天|日期|开始|结束", q):
+        # 必须出现完整月日或钟点才算证据。"精细安排""报到日期"，
+        # 以及文件名里的"2024年12月"，都不是放假/报到日期。
+        if not re.search(m_evt.group(0) + r".{0,25}(\d{1,2}\s*月\s*\d{1,2}\s*日"
+                                            r"|\d{1,2}\s*[:：]\s*\d{2})", corpus):
+            return True
     if "校历" in q and not re.search(r"校历.{0,30}(开学|上课)|开学.{0,30}校历", corpus):
         return True
-    if "学费" in q and re.search(r"多少|多少钱|标准", q):
-        if not re.search(r"学费.{0,20}\d+(?:\.\d+)?\s*元", corpus):
+    if re.search(r"学费|住宿费", q) and re.search(r"多少|多少钱|标准", q):
+        item = "学费" if "学费" in q else "住宿费"
+        if not re.search(item + r".{0,20}\d+(?:\.\d+)?\s*元", corpus):
             return True
     return False
 
