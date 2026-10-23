@@ -336,11 +336,15 @@ def _drop_marker(text):
 
 
 def _truncate_answer(text, limit=400):
-    """按完整句子限制答案长度，避免在句中硬切。"""
+    """按完整句子限制答案长度，避免在句中硬切。
+
+    截断后要补 "……"，所以正文只能用 limit-2 个字符——
+    否则补完省略号会变成 402 字，超出上限。
+    """
     text = (text or "").strip()
     if len(text) <= limit:
         return text
-    head = text[:limit]
+    head = text[:limit - 2]
     positions = [head.rfind(mark) for mark in ("。", "！", "？", "!", "?", "\n")]
     cut = max(positions)
     if cut >= 0:
