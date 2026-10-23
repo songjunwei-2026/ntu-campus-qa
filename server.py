@@ -15,6 +15,8 @@
   POST /api/ask      {"q": "问题"}  ->  回答 + 出处 + 涉及地点
 """
 import os, sys, json, re, socket
+from collections import OrderedDict
+from datetime import date
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from urllib.parse import urlparse, parse_qs, parse_qsl, urlencode
 
@@ -37,6 +39,47 @@ STATS = {}
 _p = os.path.join(BASE, "corpus", "stats.json")
 if os.path.exists(_p):
     STATS = json.load(open(_p, encoding="utf-8"))
+
+_ANSWER_CACHE = OrderedDict()
+_CACHE_HITS = 0
+_CACHE_STATE = None
+_CACHE_MAX = 200
+
+
+def _norm_q(q):
+    """问题缓存键：半角化、英文小写并折叠连续空白。"""
+    out = []
+    for ch in str(q or "").strip():
+        code = ord(ch)
+        if code == 0x3000:
+            ch = " "
+        elif 0xFF01 <= code <= 0xFF5E:
+            ch = chr(code - 0xFEE0)
+        out.append(ch)
+    return re.sub(r"\s+", " ", "".join(out)).lower()
+
+
+def _cache_state_now():
+    paths = (os.path.join(BASE, "corpus", "chunks.jsonl"), FACT_CHUNKS)
+    mtimes = []
+    for path in paths:
+        try:
+            mtimes.append(os.path.getmtime(path))
+        except OSError:
+            mtimes.append(None)
+    return (date.today().isoformat(), tuple(mtimes))
+
+
+def _cache_prepare():
+    global _CACHE_STATE
+    state = _cache_state_now()
+    if _CACHE_STATE != state:
+        _ANSWER_CACHE.clear()
+        _CACHE_STATE = state
+
+
+def _copy_result(result):
+    return json.loads(json.dumps(result, ensure_ascii=False))
 
 # 模型答案里的数值必须能在原文中找到，找不到就退回原文摘录。
 # 这是低成本的事实校验：政策问答错一个百分点的危害，远大于答得不够漂亮。
@@ -522,7 +565,7 @@ def _web_answer(q, places_block, expanded=None, depth=0):
     }
 
 
-def answer(q):
+def _answer_uncached(q):
     P = _place_block(q)
     # 明确在问"某地怎么走/在哪"时，位置本身就是答案，不必先看政策语料
     if P["matched"] and P.get("reason", "").startswith(("locative", "delivery", "room")):
@@ -661,6 +704,25 @@ def answer(q):
     return res
 
 
+def answer(q):
+    """带进程内 LRU 缓存的问答入口；拒答和异常结果不缓存。"""
+    global _CACHE_HITS
+    _cache_prepare()
+    key = _norm_q(q)
+    if key in _ANSWER_CACHE:
+        _CACHE_HITS += 1
+        cached = _ANSWER_CACHE.pop(key)
+        _ANSWER_CACHE[key] = cached
+        return _copy_result(cached)
+    result = _answer_uncached(q)
+    if result.get("ok"):
+        _ANSWER_CACHE[key] = _copy_result(result)
+        _ANSWER_CACHE.move_to_end(key)
+        while len(_ANSWER_CACHE) > _CACHE_MAX:
+            _ANSWER_CACHE.popitem(last=False)
+    return result
+
+
 MIME = {".html": "text/html; charset=utf-8", ".css": "text/css; charset=utf-8",
         ".js": "application/javascript; charset=utf-8", ".webp": "image/webp",
         ".png": "image/png", ".jpg": "image/jpeg", ".svg": "image/svg+xml",
@@ -743,6 +805,8 @@ class Handler(BaseHTTPRequestHandler):
                 "fact_docs": fact_docs,
                 "web_cache": learn["cache"],
                 "misses": learn["misses"],
+                "cache_hits": _CACHE_HITS,
+                "cache_size": len(_ANSWER_CACHE),
             })
         if path == "/api/misses":
             return self._send(200, {"items": weblearn.misses(),
