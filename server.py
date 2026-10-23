@@ -873,7 +873,12 @@ class Handler(BaseHTTPRequestHandler):
                 body = json.loads(self.rfile.read(n).decode("utf-8"))
             except Exception:
                 return self._send(400, {"error": "请求体不是合法 JSON"})
-            q = (body.get("q") or "").strip()
+            if not isinstance(body, dict):
+                return self._send(400, {"error": "请求体必须是 JSON 对象"})
+            q_value = body.get("q")
+            if not isinstance(q_value, str):
+                return self._send(400, {"error": "问题必须是字符串"})
+            q = q_value.strip()
             if not q or len(q) > 200:
                 return self._send(400, {"error": "问题不能为空且不能超过 200 字"})
             if not isinstance(body.get("citation_titles"), list):
@@ -890,7 +895,12 @@ class Handler(BaseHTTPRequestHandler):
             body = json.loads(self.rfile.read(n).decode("utf-8"))
         except Exception:
             return self._send(400, {"error": "请求体不是合法 JSON"})
-        q = (body.get("q") or "").strip()
+        if not isinstance(body, dict):
+            return self._send(400, {"error": "请求体必须是 JSON 对象"})
+        q_value = body.get("q")
+        if not isinstance(q_value, str):
+            return self._send(400, {"error": "问题必须是字符串"})
+        q = q_value.strip()
         if not q:
             return self._send(400, {"error": "问题为空"})
         if len(q) > 200:
