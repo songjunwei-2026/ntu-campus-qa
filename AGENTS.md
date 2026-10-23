@@ -17,6 +17,7 @@
 | 规则回归 | 无 | `test_rules.py` 28 条 |
 | 接口 | `/api/status`、`/api/ask` | 另有 `/api/feedback`、`/api/misses`、`/api/places`、`/api/place` |
 | 意图拦截 | 无 | `intent_rules.py` 外置规则 + `_intent_mismatch()` |
+| 前端 | — | `web/index.html` 单文件；首屏文案与排版 2026-10-23 定稿；版本号在 footer |
 
 给 Codex 跑自检时，如果 `len(server.R.docs)` 跑出 3180 而不是 2447，**这是对的，不要"修正"回去**。
 
