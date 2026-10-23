@@ -242,16 +242,18 @@ def _intent_mismatch(q, groups):
         match = re.search(rule["ask"], q)
         if not match:
             continue
-        if rule["name"] == "event_date" and not re.search(
-                r"什么时候|什么时间|何时|几月|哪天|日期|开始|结束", q):
+        # require：规则自带的附加条件，比如"必须在问时间"，不满足就跳过这条规则。
+        # 写成规则字段而不是按 name 特判——按名字判断的话，将来改个名行为就悄悄变了。
+        if rule.get("require") and not re.search(rule["require"], q):
             continue
         found = False
         for evidence in rule["evidence"]:
             pattern = evidence
-            if match.groupdict():
+            if "{event}" in pattern:
                 pattern = pattern.format(**match.groupdict())
-            if rule["name"] == "fee_amount":
-                pattern = pattern.replace("{item}", "学费" if "学费" in q else "住宿费")
+            if "{item}" in pattern:
+                # item 从命中文本里取，避免在规则名上挂特例
+                pattern = pattern.replace("{item}", "学费" if "学费" in match.group(0) else "住宿费")
             if pattern.startswith("re:"):
                 found = bool(re.search(pattern[3:], corpus))
             else:
