@@ -18,8 +18,13 @@
 | 接口 | `/api/status`、`/api/ask` | 另有 `/api/feedback`、`/api/misses`、`/api/places`、`/api/place` |
 | 意图拦截 | 无 | `intent_rules.py` 外置规则 + `_intent_mismatch()` |
 | 前端 | — | `web/index.html` 单文件；首屏文案与排版 2026-10-23 定稿；版本号在 footer |
+| 运行环境 | 无 | 官方 Python **3.13.17** → `D:\Python\python.exe`（2026-10-23 安装，已在 PATH）；第三方依赖只有 `qrcode` |
 
 给 Codex 跑自检时，如果 `len(server.R.docs)` 跑出 3180 而不是 2447，**这是对的，不要"修正"回去**。
+
+自检命令直接用 `python test_rules.py` / `python eval.py`。**注意**：通过 `codex sandbox` 子命令调用时裸写 `python` 会报
+`CreateProcessAsUserW failed: 2`（沙箱不做 PATH 搜索），要写成 `cmd /c "python ..."` 或 `D:\Python\python.exe ...`。
+真实会话里经 shell 执行不受此限。`eval.py --llm` 需要联网，沙箱内网络被拦（WinError 10013），这类验证交人工跑。
 
 下文**第 8 节「第 1 步已验收」记录的接口契约与 4 处缺陷修复仍然有效**，不要改回去。
 当前要做的任务看最新的 `docs/CODEX_TASK_*.md`。
