@@ -59,6 +59,17 @@ def main():
     n_ref = sum(1 for c in CASES if not c[3]) if use_llm else 0
     doc_ok = ans_ok = ref_ok = src_ok = 0
     total = 0.0
+    usage_total = {"in": 0, "cached": 0, "out": 0}
+
+    def take_usage(res):
+        usage = res.get("usage") or {}
+        values = {k: int(usage.get(k) or 0) for k in usage_total}
+        for key, value in values.items():
+            usage_total[key] += value
+        return values
+
+    def usage_text(values):
+        return "in=%d/cached=%d/out=%d" % (values["in"], values["cached"], values["out"])
 
     print("%-24s %-6s %-6s %-6s" % ("问题", "文件", "答案", "耗时"))
     print("-" * 56)
@@ -76,12 +87,15 @@ def main():
                 print("%-24s %-6s %-6s %-6s" % (q[:22], "-", "跳过", "-"))
                 continue
             t0 = time.time()
-            ok = not server.answer(q)["ok"]
+            res = server.answer(q)
+            values = take_usage(res)
+            ok = not res["ok"]
             elapsed = time.time() - t0
             ref_ok += ok
             total += elapsed
             print("%-24s %-6s %-6s %-6s %s" % (q[:22], "-", "-", "%.1fs" % elapsed,
-                  "✓ 正确拒答" if ok else "✗ 未拒答 ← " + top_title[:24]))
+                  ("✓ 正确拒答" if ok else "✗ 未拒答 ← " + top_title[:24]) +
+                  " " + usage_text(values)))
             continue
 
         if is_web:
@@ -91,6 +105,7 @@ def main():
                 continue
             t0 = time.time()
             res = server.answer(q)
+            values = take_usage(res)
             elapsed = time.time() - t0
             ans = res["answer"] if res["ok"] else ""
             hit_ans = bool(ans) and any(m in ans for m in must)
@@ -100,8 +115,8 @@ def main():
             ans_ok += hit_ans and hit_src
             src_ok += hit_src
             total += elapsed
-            print("%-24s %-6s %-6s %-6s" % (q[:22], "官网" if hit_src else "✗源",
-                  "✓" if hit_ans else "✗", "%.1fs" % elapsed))
+            print("%-24s %-6s %-6s %-6s %s" % (q[:22], "官网" if hit_src else "✗源",
+                  "✓" if hit_ans else "✗", "%.1fs" % elapsed, usage_text(values)))
             if not hit_src:
                 print("      来源等级不足：%s" % ((cites[0].get("grade_label") if cites else "无引用")))
             elif not hit_ans:
@@ -113,6 +128,7 @@ def main():
         if use_llm:
             t0 = time.time()
             res = server.answer(q)
+            values = take_usage(res)
             elapsed = time.time() - t0
             ans = res["answer"] if res["ok"] else ""
             hit_ans = bool(ans) and any(m in ans for m in must)
@@ -121,8 +137,9 @@ def main():
             continue
         ans_ok += hit_ans
         total += elapsed
-        print("%-24s %-6s %-6s %-6s" % (q[:22], "✓" if hit_doc else "✗",
-              "✓" if hit_ans else "✗", "%.1fs" % elapsed if use_llm else "-"))
+        extra = usage_text(values) if use_llm else ""
+        print("%-24s %-6s %-6s %-6s %s" % (q[:22], "✓" if hit_doc else "✗",
+              "✓" if hit_ans else "✗", "%.1fs" % elapsed if use_llm else "-", extra))
         if not hit_doc:
             print("      首条文件：%s" % top_title[:46])
 
@@ -138,6 +155,10 @@ def main():
         print("拒答层 跳过（加 --llm 才测试）")
     if use_llm:
         print("总耗时 %.1fs | 单题平均 %.1fs" % (total, total / len(CASES)))
+        uncached = max(usage_total["in"] - usage_total["cached"], 0)
+        cost = (usage_total["cached"] * 0.02 + uncached * 1.0 + usage_total["out"] * 4.0) / 1000000
+        print("Token 合计 in=%d cached=%d out=%d | 估算成本 %.6f 元" % (
+            usage_total["in"], usage_total["cached"], usage_total["out"], cost))
 
 
 if __name__ == "__main__":

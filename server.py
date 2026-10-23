@@ -44,6 +44,10 @@ _ANSWER_CACHE = OrderedDict()
 _CACHE_HITS = 0
 _CACHE_STATE = None
 _CACHE_MAX = 200
+_TOTAL_IN = 0
+_TOTAL_CACHED = 0
+_TOTAL_OUT = 0
+_USAGE_CALLS = 0
 
 
 def _norm_q(q):
@@ -80,6 +84,15 @@ def _cache_prepare():
 
 def _copy_result(result):
     return json.loads(json.dumps(result, ensure_ascii=False))
+
+
+def _usage_now():
+    usage = llm.LAST_USAGE or {}
+    return {
+        "in": int(usage.get("prompt_tokens") or 0),
+        "cached": int(usage.get("prompt_cache_hit_tokens") or 0),
+        "out": int(usage.get("completion_tokens") or 0),
+    }
 
 # 模型答案里的数值必须能在原文中找到，找不到就退回原文摘录。
 # 这是低成本的事实校验：政策问答错一个百分点的危害，远大于答得不够漂亮。
@@ -706,17 +719,32 @@ def _answer_uncached(q):
 
 def answer(q):
     """带进程内 LRU 缓存的问答入口；拒答和异常结果不缓存。"""
-    global _CACHE_HITS
+    global _CACHE_HITS, _TOTAL_IN, _TOTAL_CACHED, _TOTAL_OUT, _USAGE_CALLS
     _cache_prepare()
     key = _norm_q(q)
     if key in _ANSWER_CACHE:
         _CACHE_HITS += 1
         cached = _ANSWER_CACHE.pop(key)
         _ANSWER_CACHE[key] = cached
-        return _copy_result(cached)
+        result = _copy_result(cached)
+        result["usage"] = {"in": 0, "cached": 0, "out": 0}
+        result["cached"] = True
+        return result
+    llm.LAST_USAGE.clear()
     result = _answer_uncached(q)
+    usage = _usage_now()
+    if usage["in"] or usage["cached"] or usage["out"]:
+        _TOTAL_IN += usage["in"]
+        _TOTAL_CACHED += usage["cached"]
+        _TOTAL_OUT += usage["out"]
+        _USAGE_CALLS += 1
+    result["usage"] = usage
+    result["cached"] = False
     if result.get("ok"):
-        _ANSWER_CACHE[key] = _copy_result(result)
+        saved = _copy_result(result)
+        saved.pop("usage", None)
+        saved.pop("cached", None)
+        _ANSWER_CACHE[key] = saved
         _ANSWER_CACHE.move_to_end(key)
         while len(_ANSWER_CACHE) > _CACHE_MAX:
             _ANSWER_CACHE.popitem(last=False)
@@ -807,6 +835,11 @@ class Handler(BaseHTTPRequestHandler):
                 "misses": learn["misses"],
                 "cache_hits": _CACHE_HITS,
                 "cache_size": len(_ANSWER_CACHE),
+                "total_in": _TOTAL_IN,
+                "total_cached": _TOTAL_CACHED,
+                "total_out": _TOTAL_OUT,
+                "avg_in": round(_TOTAL_IN / _USAGE_CALLS, 1) if _USAGE_CALLS else 0,
+                "avg_out": round(_TOTAL_OUT / _USAGE_CALLS, 1) if _USAGE_CALLS else 0,
             })
         if path == "/api/misses":
             return self._send(200, {"items": weblearn.misses(),
