@@ -24,7 +24,7 @@ BASE = os.path.dirname(os.path.abspath(__file__))
 WEB = os.path.join(BASE, "web")
 sys.path.insert(0, BASE)
 
-from rag import Retriever, dept_name
+from rag import Retriever, dept_name, SYNONYMS
 import llm
 import places as campus_places
 import websearch, weblearn
@@ -50,6 +50,64 @@ _TOTAL_IN = 0
 _TOTAL_CACHED = 0
 _TOTAL_OUT = 0
 _USAGE_CALLS = 0
+_SUGGEST_STATE = None
+_SUGGEST_ITEMS = []
+def _suggest_norm(s):
+    s = str(s or '').strip().lower()
+    return ''.join(chr(ord(c)-0xFEE0) if 0xFF01 <= ord(c) <= 0xFF5E else (' ' if ord(c)==0x3000 else c) for c in s).replace(' ','')
+def _suggest_prepare():
+    global _SUGGEST_STATE, _SUGGEST_ITEMS
+    state = _cache_state_now()
+    if state == _SUGGEST_STATE: return
+    seen=set(); items=[]
+    for d in R.docs:
+        title=str(d.get('title') or '').strip()
+        if title and title not in seen:
+            seen.add(title); items.append({'text':title,'kind':'faq' if d.get('source')=='faq' else 'title'})
+    items.sort(key=lambda x: 0 if x['kind']=='faq' else 1); _SUGGEST_ITEMS=items; _SUGGEST_STATE=state
+def suggest(q,n=6):
+    q=str(q or '').strip(); nq=_suggest_norm(q)
+    if len(nq)<2: return {'q':q,'items':[]}
+    _suggest_prepare(); out=[]
+    # 同义扩展复用检索层的 SYNONYMS，避免"联想给不出、检索却答得上"的错位
+    #（如「保研」在标题里写作「推免」「推荐免试」）
+    alts=[]
+    for k, vs in SYNONYMS.items():
+        if _suggest_norm(k) in nq:
+            for v in vs:
+                nv=_suggest_norm(v)
+                if nv and nv != nq and nv not in alts:
+                    alts.append(nv)
+    for item in _SUGGEST_ITEMS:
+        t=_suggest_norm(item['text'])
+        score=None
+        if nq in t:
+            score=100+max(0,50-len(t))
+        else:
+            best=None
+            for alt in alts:
+                if alt in t:
+                    cand=90+max(0,40-len(t))
+                else:
+                    # 同义词允许字符覆盖：「推荐免试」在标题里写作
+                    #「推荐优秀应届本科毕业生免试攻读」，不是连续子串但意思相同
+                    ar=sum(1 for c in set(alt) if c in t)/max(1,len(set(alt)))
+                    if ar<.8: continue
+                    cand=70+ar*20
+                if best is None or cand>best: best=cand
+            score=best
+        if score is None:
+            # 两个字必须全中：只中一个字基本是噪声
+            #（「电瓶」只中"电"，会命中「校园网连不上电脑怎么办」，纯误导）
+            if len(nq)<=2: continue
+            rate=sum(1 for c in set(nq) if c in t)/max(1,len(set(nq)))
+            if rate<.6: continue
+            score=rate*100
+        out.append((score,item))
+    # 同分时 faq（同学问过的话）优先，其余保持原顺序
+    out.sort(key=lambda x:(-x[0], 0 if x[1]['kind']=='faq' else 1))
+    # n<=0 视为未指定，按默认 6 条；上限 10 条避免下拉过长
+    return {'q':q,'items':[x[1] for x in out[:max(1,min(int(n) or 6,10))]]}
 
 
 def _norm_q(q):
@@ -821,6 +879,11 @@ class Handler(BaseHTTPRequestHandler):
             if not os.path.exists(fp):
                 return self._send(500, "缺少 web/index.html", "text/plain; charset=utf-8")
             return self._send(200, open(fp, "rb").read(), "text/html; charset=utf-8")
+        if path == "/api/suggest":
+            q=(parse_qs(u.query).get('q') or [''])[0]
+            try: n=int((parse_qs(u.query).get('n') or ['6'])[0])
+            except ValueError: n=6
+            return self._send(200,suggest(q,n))
         if path == "/api/status":
             learn = weblearn.stats()
             web_docs = len({d.get("doc_uid") for d in R.docs
