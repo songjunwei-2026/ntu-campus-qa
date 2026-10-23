@@ -40,3 +40,6 @@ START.md
 从这里开始.txt
 开始工作.md
 方案确认.md
+
+# 瓦片缓存（重建底图时生成）
+tools/.tilecache/

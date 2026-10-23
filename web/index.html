@@ -63,7 +63,7 @@
   .map-canvas.dragging{cursor:grabbing}
   .map-stage{position:absolute;top:0;left:0;width:100%;height:100%;transform-origin:0 0;will-change:transform}
   .map-stage img{position:absolute;inset:0;width:100%;height:100%;object-fit:fill;user-select:none;-webkit-user-drag:none;pointer-events:none;image-rendering:auto}
-  .marker-layer{position:absolute;inset:0;overflow:hidden;pointer-events:none}
+  .marker-layer{position:absolute;inset:0;overflow:hidden;pointer-events:none;transform-origin:0 0;will-change:transform}
   .mk{position:absolute;transform:translate(-50%,-100%);border:0;background:transparent;padding:0;cursor:pointer;display:flex;flex-direction:column;align-items:center;pointer-events:auto}
   .mk-pin{width:20px;height:20px;border-radius:50% 50% 50% 2px;transform:rotate(45deg);background:var(--navy);border:2px solid var(--card);box-shadow:0 1px 4px rgba(11,59,114,.4);transition:background-color 160ms ease-out,transform 160ms ease-out}
   .mk-label{margin-top:3px;padding:0 5px;background:rgba(255,255,255,.94);border:1px solid var(--line);color:var(--navy);font:11px/1.65 var(--sans);white-space:nowrap;opacity:0;transition:opacity 160ms ease-out;pointer-events:none}
@@ -159,6 +159,18 @@
   }
   @media(max-width:639px){.topbar{padding:0 20px}.brand-rule{margin:0 8px}.brand-subtitle{font-size:12px}.stats{font-size:11px}.wrap{padding-left:20px;padding-right:20px}.hero{padding-top:48px}.examples{grid-template-columns:1fr}.sources-heading{display:block}.sources-note{display:block;margin-top:4px}.source-score{justify-content:flex-start}.search-row{gap:8px}.answer-block{padding:22px 18px 22px 32px}.answer-block:before{left:11px;opacity:.2}.stamp{right:11px;top:11px;font-size:10px;padding:4px 7px 3px}.answer-label{padding-right:74px}}
   @media(max-width:430px){.brand-subtitle{max-width:126px;overflow:hidden;text-overflow:ellipsis}.stats{display:none}.brand-name{font-size:24px}}
+  .ask-history{position:fixed;left:50%;bottom:20px;transform:translateX(-50%);z-index:60;display:flex;align-items:center;gap:2px;padding:4px;background:rgba(11,59,114,.96);border-radius:4px;box-shadow:0 8px 24px rgba(8,43,85,.26),0 0 0 1px rgba(255,255,255,.2);backdrop-filter:blur(6px)}
+  .ask-history[hidden]{display:none}
+  .ask-history button{border:0;border-radius:2px;background:transparent;color:#fff;font:13px/1.7 var(--sans);padding:5px 12px;cursor:pointer;white-space:nowrap;opacity:.9;transition:background-color 160ms ease-out,opacity 160ms ease-out}
+  .ask-history button:hover:not(:disabled){background:rgba(255,255,255,.16);opacity:1}
+  .ask-history button:disabled{opacity:.34;cursor:default}
+  .ask-history .ah-home{border-left:1px solid rgba(255,255,255,.22);margin-left:2px}
+  body.has-history .wrap{padding-bottom:96px}
+  @media(max-width:639px){
+    .ask-history{bottom:14px;padding:3px}
+    .ask-history button{padding:5px 9px;font-size:12px}
+    body.has-history .wrap{padding-bottom:88px}
+  }
   @media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}.search-input,.search-submit,.example{transition:none}.answer-block,.source-item,.stamp{animation:none}.stamp{opacity:1;transform:rotate(-8deg)}}
 </style>
 <script>
@@ -190,7 +202,8 @@ window.__BUILD="2026-10-19-19";
 <header class="topbar"><div class="topbar-inner"><div class="brand-lockup"><span class="brand-name">通晓</span><span class="brand-rule"></span><span class="brand-subtitle">南通大学校园政策问答</span></div><div class="nav-switch" role="tablist" aria-label="切换视图"><button class="nav-tab" type="button" role="tab" data-view="ask" aria-selected="true">问答</button><button class="nav-tab" type="button" role="tab" data-view="map" aria-selected="false">校园地图</button></div><div id="stats" class="stats" hidden><span id="statusDot" class="status-dot"></span><span id="statsText"></span></div></div></header>
 <main class="wrap"><section class="hero"><h1>有据可查</h1><p>每条回答都连着原文：标出发文部门和日期，点开就能核对。查不到的时候，它会直接说查不到。</p></section>
 <form id="askForm" class="search-row" style="position:relative"><input id="question" class="search-input" type="text" maxlength="200" autocomplete="off" placeholder="例如：国家奖学金的申请条件是什么"><button id="askButton" class="search-submit" type="submit" aria-label="提交问题"><svg viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M4 10h11M10 5l5 5-5 5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></button><div id="suggestBox" class="suggestions" hidden role="listbox" aria-label="候选问题"></div></form>
-<section id="examplesWrap" aria-label="示例问题"><h2 class="examples-title">试试问这些</h2><div id="examples" class="examples"></div></section><section id="output" aria-live="polite"></section><section id="askMap" class="ask-map" hidden aria-label="位置示意图"><div class="ask-map-head"><h2 class="ask-map-title">位置示意</h2><div class="ask-map-tools"><button class="am-btn" type="button" data-am="in" aria-label="放大">＋</button><button class="am-btn" type="button" data-am="out" aria-label="缩小">－</button><button class="am-btn" type="button" data-am="reset" aria-label="复位">复位</button><button class="am-btn solid" type="button" data-am="full">完整地图</button></div></div><div class="ask-map-canvas" id="askCanvas"><div class="mini-stage" id="askStage"><img src="/assets/campus.webp" alt="南通大学啬园校区底图" draggable="false"></div><div class="mini-markers" id="askMarkers"></div><div class="mini-note" id="askNote" hidden></div><div class="mini-credit">底图 © 高德地图（z18）　·　可拖动、滚轮缩放</div></div></section><footer>通晓 · 南通大学校园政策问答　|　语料截至 2026 年 10 月　|　所有内容以原文为准　|　<span style="color:#8A94A3">版本 2026-10-23-23</span></footer></main>
+<section id="examplesWrap" aria-label="示例问题"><h2 class="examples-title">试试问这些</h2><div id="examples" class="examples"></div></section><section id="output" aria-live="polite"></section><section id="askMap" class="ask-map" hidden aria-label="位置示意图"><div class="ask-map-head"><h2 class="ask-map-title">位置示意</h2><div class="ask-map-tools"><button class="am-btn" type="button" data-am="in" aria-label="放大">＋</button><button class="am-btn" type="button" data-am="out" aria-label="缩小">－</button><button class="am-btn" type="button" data-am="reset" aria-label="复位">复位</button><button class="am-btn solid" type="button" data-am="full">完整地图</button></div></div><div class="ask-map-canvas" id="askCanvas"><div class="mini-stage" id="askStage"><img src="/assets/campus.webp" alt="南通大学啬园校区底图" draggable="false"></div><div class="mini-markers" id="askMarkers"></div><div class="mini-note" id="askNote" hidden></div><div class="mini-credit">底图 © 高德地图（z19）　·　可拖动、滚轮缩放</div></div></section><footer>通晓 · 南通大学校园政策问答　|　语料截至 2026 年 10 月　|　所有内容以原文为准　|　<span style="color:#8A94A3">版本 2026-10-23-24</span></footer></main>
+<div class="ask-history" id="askHistory" role="group" aria-label="浏览历史" hidden><button type="button" id="navBack" data-hist="back" aria-label="后退" disabled>‹ 后退</button><button type="button" id="navFwd" data-hist="fwd" aria-label="前进" disabled>前进 ›</button><button type="button" id="navHome" class="ah-home" data-hist="home" aria-label="回到首页" disabled>回到首页</button></div>
 <main class="map-shell" aria-label="校园地图">
   <aside class="map-side">
     <div class="map-side-head">
@@ -215,7 +228,7 @@ window.__BUILD="2026-10-19-19";
       <button type="button" data-act="out" aria-label="缩小">−</button>
       <button type="button" data-act="reset" aria-label="复位">⌂</button>
     </div>
-    <div class="map-credit">底图 © 高德地图（z18）　·　点位按底图标注实测，误差约 10–30 米</div>
+    <div class="map-credit">底图 © 高德地图（z19）　·　点位按底图标注实测，误差约 10–30 米</div>
     <div class="map-hint" id="mapHint"></div>
   </div>
 </main>
@@ -253,7 +266,7 @@ function onSuggestKey(e){
 }
 /* ================= 地址可写 + 复制链接（T9） ================= */
 var LAST_Q="";
-function setQueryURL(q,push){const url=location.pathname+"?q="+encodeURIComponent(q);try{if(push)history.pushState({q:q},"",url);else history.replaceState({q:q},"",url)}catch(e){}}
+function setQueryURL(q,push){const url=location.pathname+"?q="+encodeURIComponent(q);try{if(push){navPush({q:q},url)}else{history.replaceState({q:q,d:navDepth()},"",url)}}catch(e){}navSync()}
 function bindCopyLink(q){const b=$("#copyLink");if(!b)return;b.onclick=function(){
   const url=location.origin+location.pathname+"?q="+encodeURIComponent(q||"");
   const done=function(){b.textContent="链接已复制";b.classList.add("done");setTimeout(function(){b.textContent="复制链接";b.classList.remove("done")},1600)};
@@ -372,14 +385,16 @@ function layoutMarkers(){
     const el=document.querySelector(`.mk[data-id="${p.id}"]`);
     if(!el)return;
     const{x,y}=mapXY(p);
-    el.style.left=(MAP.tx+x/100*w*MAP.scale)+"px";
-    el.style.top=(MAP.ty+y/100*h*MAP.scale)+"px";
+    el.style.left=x+"%";
+    el.style.top=y+"%";
   });
 }
 
 function paint(){
   const s=document.getElementById("mapStage");
   if(s)s.style.transform=`translate(${MAP.tx}px,${MAP.ty}px) scale(${MAP.scale})`;
+  const markers=document.getElementById("markers");
+  if(markers)markers.style.transform="translate("+MAP.tx+"px,"+MAP.ty+"px) scale("+MAP.scale+")";
   layoutMarkers();
 }
 
@@ -543,7 +558,7 @@ function showView(v,push){
   document.querySelectorAll(".nav-tab").forEach(b=>b.setAttribute("aria-selected",String(b.dataset.view===v)));
   if(push!==false){
     const url=v==="map"?"/map":"/";
-    if(location.pathname!==url)history.pushState({v},"",url);
+    if(location.pathname!==url)navPush({v:v},url);
   }
   if(v==="map"){
     if(!MAP.loaded)loadPlaces();
@@ -564,6 +579,56 @@ window.addEventListener("popstate",()=>{
   if(!q){LAST_Q="";$("#question").value="";$("#output").innerHTML="";const ew=$("#examplesWrap");if(ew){ew.style.display=""}return}
   $("#question").value=q;ask(false);
 });
+
+/* --- 浏览历史：后退 / 前进 / 回到首页 --- */
+var NAV={d:0,max:0};
+function navDepth(){return (history.state&&typeof history.state.d==="number")?history.state.d:0}
+function navSync(){
+  NAV.d=navDepth();if(NAV.d>NAV.max)NAV.max=NAV.d;
+  const bar=$("#askHistory");
+  const atHome=document.body.dataset.view!=="map"&&!new URLSearchParams(location.search).get("q");
+  const b=$("#navBack"),f=$("#navFwd"),h=$("#navHome");
+  if(b)b.disabled=NAV.d<=0;
+  if(f)f.disabled=NAV.d>=NAV.max;
+  if(h)h.disabled=atHome;
+  if(bar)bar.hidden=!(NAV.d>0||NAV.max>0);
+  document.body.classList.toggle("has-history",!!(bar&&!bar.hidden));
+}
+function navPush(state,url){
+  const d=navDepth()+1;
+  if(d>NAV.max)NAV.max=d;
+  state.d=d;
+  try{history.pushState(state,"",url)}catch(e){}
+  navSync();
+}
+function goHome(){
+  if(document.body.dataset.view!=="map"&&!new URLSearchParams(location.search).get("q"))return;
+  navPush({},"/");
+  showView("ask",false);
+  LAST_Q="";
+  const qi=$("#question");if(qi)qi.value="";
+  const out=$("#output");if(out)out.innerHTML="";
+  const ew=$("#examplesWrap");if(ew)ew.style.display="";
+  hideSuggest();
+  window.scrollTo({top:0,behavior:"smooth"});
+  navSync();
+}
+(function(){
+  if(!history.state||typeof history.state.d!=="number"){
+    try{history.replaceState({d:0},"",location.href)}catch(e){}
+  }
+  const bar=$("#askHistory");
+  if(bar)bar.addEventListener("click",e=>{
+    const t=e.target.closest("button[data-hist]");
+    if(!t||t.disabled)return;
+    const a=t.getAttribute("data-hist");
+    if(a==="back")history.back();
+    else if(a==="fwd")history.forward();
+    else goHome();
+  });
+  window.addEventListener("popstate",navSync);
+  navSync();
+})();
 
 /* ================= 问答页内嵌地图（独立实例） ================= */
 const MINI={data:[],bbox:null,sel:null,scale:1,tx:0,ty:0,min:1,max:6,loaded:false,ready:false};
