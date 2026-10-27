@@ -800,6 +800,123 @@ def _answer_uncached(q):
     return res
 
 
+def _split_sent(text):
+    """按中文句末标点切句，丢掉空白和过短的碎片。"""
+    out, buf = [], ""
+    for ch in text:
+        buf += ch
+        if ch in "。！？；\n":
+            s = buf.strip()
+            if len(s) >= 12:
+                out.append(s)
+            buf = ""
+    s = buf.strip()
+    if len(s) >= 12:
+        out.append(s)
+    return out[:24]
+
+
+def _keyword(q, n_files=3, n_clauses=3):
+    """关键词检索：最相关的 N 个文件 + N 个条款（条款=命中块里的原句）。"""
+    hits = R.search(q, top=48)
+    if not hits:
+        return {"ok": False, "files": [], "clauses": []}
+
+    files, seen = [], set()
+    qchars_of = lambda s: sum(1 for ch in q if not ch.isspace() and ch in s)
+    for h in hits:
+        c = h["chunk"]
+        uid = c.get("doc_uid")
+        if not uid or uid in seen:
+            continue
+        seen.add(uid)
+        sents = _split_sent(c.get("text") or "")
+        # 摘要优先取命中关键词最多的那句，取不到再退回首句
+        best = max(sents, key=qchars_of) if sents else ""
+        if not best or qchars_of(best) == 0:
+            best = sents[0] if sents else (c.get("text") or "")[:120]
+        files.append({
+            "uid": uid,
+            "title": c.get("title") or "(无标题)",
+            "dept": dept_name(c.get("dept")),
+            "date": c.get("date") or "",
+            "url": c.get("url") or "",
+            "source": c.get("source") or "",
+            "score": h["score"],
+            "snippet": best,
+        })
+        if len(files) >= n_files:
+            break
+
+    qchars = [ch for ch in q if not ch.isspace()]
+    clauses, used = [], set()
+    for h in hits:
+        c = h["chunk"]
+        for s in _split_sent(c.get("text") or ""):
+            hit_n = sum(1 for ch in qchars if ch in s)
+            if hit_n < 2:
+                continue
+            key = s[:40]
+            if key in used:
+                continue
+            used.add(key)
+            clauses.append({
+                "text": s,
+                "title": c.get("title") or "(无标题)",
+                "dept": dept_name(c.get("dept")),
+                "date": c.get("date") or "",
+                "url": c.get("url") or "",
+                "uid": c.get("doc_uid") or "",
+            })
+            if len(clauses) >= n_clauses:
+                break
+        if len(clauses) >= n_clauses:
+            break
+
+    return {"ok": True, "q": q, "files": files, "clauses": clauses}
+
+
+def _tree_data():
+    """文件树：一级=年份，二级=发文部门，三级=文件。"""
+    docs, chunks = {}, {}
+    for d in R.docs:
+        uid = d.get("doc_uid")
+        if not uid:
+            continue
+        chunks[uid] = chunks.get(uid, 0) + 1
+        if uid in docs:
+            continue
+        y = str(d.get("year") or "").strip()
+        if not y.isdigit():
+            dt = str(d.get("date") or "")
+            y = dt[:4] if len(dt) >= 4 and dt[:4].isdigit() else "未标注"
+        docs[uid] = {
+            "uid": uid,
+            "title": d.get("title") or "(无标题)",
+            "dept": dept_name(d.get("dept")) or "未标注",
+            "date": d.get("date") or "",
+            "year": y,
+            "url": d.get("url") or "",
+            "source": d.get("source") or "",
+        }
+    tree = {}
+    for uid, d in docs.items():
+        d["chunks"] = chunks.get(uid, 1)
+        node = tree.setdefault(d["year"], {})
+        node.setdefault(d["dept"], []).append(d)
+    years = []
+    order = sorted([k for k in tree if k != "未标注"], reverse=True)
+    if "未标注" in tree:
+        order.append("未标注")
+    for y in order:
+        depts = []
+        for name in sorted(tree[y].keys(), key=lambda k: (-len(tree[y][k]), k)):
+            items = sorted(tree[y][name], key=lambda x: x["date"], reverse=True)
+            depts.append({"name": name, "count": len(items), "docs": items})
+        years.append({"year": y, "count": sum(d["count"] for d in depts), "depts": depts})
+    return {"years": years, "total": len(docs)}
+
+
 def answer(q):
     """带进程内 LRU 缓存的问答入口；拒答和异常结果不缓存。"""
     global _CACHE_HITS, _TOTAL_IN, _TOTAL_CACHED, _TOTAL_OUT, _USAGE_CALLS
@@ -892,11 +1009,23 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header("Content-Length", "0")
             self.end_headers()
             return
-        if path in ("/", "/index.html", "/map", "/map/"):
+        if path in ("/", "/index.html"):
+            fp = os.path.join(WEB, "app.html")
+            if not os.path.exists(fp):
+                return self._send(500, "缺少 web/app.html", "text/plain; charset=utf-8")
+            return self._send(200, open(fp, "rb").read(), "text/html; charset=utf-8")
+        if path in ("/classic", "/classic/", "/map", "/map/"):
             fp = os.path.join(WEB, "index.html")
             if not os.path.exists(fp):
                 return self._send(500, "缺少 web/index.html", "text/plain; charset=utf-8")
             return self._send(200, open(fp, "rb").read(), "text/html; charset=utf-8")
+        if path == "/api/keyword":
+            q = (parse_qs(u.query).get("q") or [""])[0].strip()
+            if not q:
+                return self._send(200, {"ok": False, "files": [], "clauses": []})
+            return self._send(200, _keyword(q))
+        if path == "/api/tree":
+            return self._send(200, _tree_data())
         if path == "/api/suggest":
             q=(parse_qs(u.query).get('q') or [''])[0]
             try: n=int((parse_qs(u.query).get('n') or ['6'])[0])
