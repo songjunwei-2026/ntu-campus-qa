@@ -64,9 +64,9 @@
   .map-stage{position:absolute;top:0;left:0;width:100%;height:100%;transform-origin:0 0;will-change:transform}
   .map-stage img{position:absolute;inset:0;width:100%;height:100%;object-fit:fill;user-select:none;-webkit-user-drag:none;pointer-events:none;image-rendering:auto}
   .marker-layer{position:absolute;inset:0;overflow:hidden;pointer-events:none;transform-origin:0 0;will-change:transform}
-  .mk{position:absolute;transform:translate(-50%,-100%);border:0;background:transparent;padding:0;cursor:pointer;display:flex;flex-direction:column;align-items:center;pointer-events:auto}
+  .mk{position:absolute;transform-origin:50% 100%;transform:translate(-50%,-100%) scale(var(--mk-inv,1));border:0;background:transparent;padding:0;cursor:pointer;display:flex;flex-direction:column;align-items:center;pointer-events:auto}
   .mk-pin{width:20px;height:20px;border-radius:50% 50% 50% 2px;transform:rotate(45deg);background:var(--navy);border:2px solid var(--card);box-shadow:0 1px 4px rgba(11,59,114,.4);transition:background-color 160ms ease-out,transform 160ms ease-out}
-  .mk-label{margin-top:3px;padding:0 5px;background:rgba(255,255,255,.94);border:1px solid var(--line);color:var(--navy);font:11px/1.65 var(--sans);white-space:nowrap;opacity:0;transition:opacity 160ms ease-out;pointer-events:none}
+  .mk-label{position:absolute;top:100%;left:50%;transform:translateX(-50%);margin-top:3px;padding:0 5px;background:rgba(255,255,255,.94);border:1px solid var(--line);color:var(--navy);font:11px/1.65 var(--sans);white-space:nowrap;opacity:0;transition:opacity 160ms ease-out;pointer-events:none}
   .mk:hover .mk-label,.mk.on .mk-label{opacity:1}
   .mk.on .mk-pin{background:var(--red);transform:rotate(45deg) scale(1.16)}
   .mk.on{z-index:6}
@@ -126,7 +126,7 @@
   .place-card-acts{display:flex;flex-wrap:wrap;gap:8px}
 
   /* ===== 问答页内嵌位置示意图 ===== */
-  .ask-map{margin-top:20px;border:1px solid var(--line);border-left:3px solid var(--navy);background:var(--card);animation:answer-in 220ms ease-out both}
+  .ask-map{margin-top:20px;border:1px solid var(--line);border-left:3px solid var(--navy);background:var(--card);overflow:hidden;max-width:100%;animation:answer-in 220ms ease-out both}
   .ask-map[hidden]{display:none}
   .ask-map-head{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:11px 18px;border-bottom:1px solid var(--line)}
   .ask-map-title{margin:0;padding-left:10px;border-left:3px solid var(--red);color:var(--navy);font:700 12px/1.4 var(--sans);letter-spacing:.15em}
@@ -298,7 +298,7 @@ function bindFeedback(d,cites){const btn=$("#feedbackBtn"),box=$("#feedbackBox")
 </script>
 <script>
 /* ================= 校园地图 ================= */
-const MAP={data:[],bbox:null,sel:null,cat:"",q:"",scale:1,tx:0,ty:0,min:1,max:5,loaded:false};
+const MAP={data:[],bbox:null,sel:null,pending:null,cat:"",q:"",scale:1,tx:0,ty:0,min:1,max:5,loaded:false};
 const canvasEl=()=>document.getElementById("mapCanvas");
 
 function mapXY(p){const b=MAP.bbox;return{x:(p.lon-b.lon0)/(b.lon1-b.lon0)*100,y:(b.lat1-p.lat)/(b.lat1-b.lat0)*100}}
@@ -324,8 +324,11 @@ async function loadPlaces(){
     MAP.bbox={lon0:b[0],lat0:b[1],lon1:b[2],lat1:b[3]};
     MAP.loaded=true;
     renderCats();renderList();renderMarkers();
+    const pending=MAP.pending;
+    MAP.pending=null;
     const want=new URLSearchParams(location.search).get("place");
-    if(want)select(want,{center:true});
+    if(pending)select(pending,{center:true});
+    else if(want)select(want,{center:true});
     else focusCampus();
   }catch(e){
     document.getElementById("mapList").innerHTML='<div class="map-empty">地点数据加载失败，请刷新页面重试</div>';
@@ -387,6 +390,7 @@ function layoutMarkers(){
     const{x,y}=mapXY(p);
     el.style.left=x+"%";
     el.style.top=y+"%";
+    el.style.setProperty("--mk-inv",String(1/MAP.scale));
   });
 }
 
@@ -659,6 +663,7 @@ function miniPaint(){
     const{x,y}=miniXY(p);
     el.style.left=x+"%";
     el.style.top=y+"%";
+    el.style.setProperty("--mk-inv",String(1/MINI.scale));
   });
 }
 
@@ -690,6 +695,7 @@ function miniLayout(){
     const{x,y}=miniXY(p);
     el.style.left=x+"%";
     el.style.top=y+"%";
+    el.style.setProperty("--mk-inv",String(1/MINI.scale));
   });
   return true;
 }
@@ -812,8 +818,8 @@ function initMiniMap(){
     else if(act==="reset"){MINI.scale=1;MINI.tx=0;MINI.ty=0;miniPaint()}
     else if(act==="full"){
       const id=MINI.sel;
-      showView("map");
-      if(id)select(id,{center:true});
+      if(MAP.loaded){showView("map");if(id)select(id,{center:true});}
+      else{MAP.pending=id;showView("map");}
     }
   });
   window.addEventListener("resize",()=>{if(!document.getElementById("askMap").hidden)miniPaint()});
@@ -894,5 +900,7 @@ if(document.body.dataset.view==="map")loadPlaces();
 </script>
 </body>
 </html>
+
+
 
 
