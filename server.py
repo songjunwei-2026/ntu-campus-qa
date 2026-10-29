@@ -519,6 +519,24 @@ def _options_answer(P):
         "、".join(cats), len(opts), "、".join(o["name"] for o in opts[:6]))
 
 
+def _options_reply(q, P, expanded, year_note=""):
+    """只报了类别（"食堂在哪"）时的兜底回复。
+
+    候选清单本身就是答案——但前提是问句真的在问位置。
+    "食堂的承包商是谁""食堂工资多少"同样会落到这个分支，那时甩一串楼名
+    等于答非所问，所以只有问句带定位词时才标 ok=True。
+    """
+    locating = any(w in q for w in ("在哪", "哪里", "哪儿", "怎么走", "怎么去",
+                                    "位置", "最近", "路线", "几号楼"))
+    return {"ok": locating, "mode": "place", "question": q,
+            "answer": _options_answer(P) if locating else
+                      "本地资料没有收录这个问题的答案。下面列出的是校内同类场所，"
+                      "如需办具体业务，建议直接联系对应部门。",
+            "citations": [],
+            "notice": "位置信息来自校园地图底座；开放时间、窗口办理等以现场公示为准。",
+            "expanded": expanded, "places": P, "year_note": year_note}
+
+
 # 需要"文件依据"的问法：只拿到报道类页面就不回答，别拿新闻稿当制度
 POLICY_ASK = re.compile(
     r"(规定|办法|条件|流程|材料|标准|比例|要求|程序|手续"
@@ -750,11 +768,7 @@ def _answer_uncached(q, emit=None):
                     "citations": [], "notice": "以上位置信息来自校园地图底座，仅供参考。",
                     "expanded": [], "places": P}
         if P["options"]:
-            # 只说了类别（"食堂在哪"）：给出候选清单本身就是答案
-            return {"ok": True, "mode": "place", "question": q,
-                    "answer": _options_answer(P), "citations": [],
-                    "notice": "位置信息来自校园地图底座；开放时间、窗口办理等以现场公示为准。",
-                    "expanded": [], "places": P}
+            return _options_reply(q, P, [])
         weblearn.log_miss(q, "no-hit:no-place")
         return {"ok": False, "mode": "retrieval", "question": q,
                 "answer": "本地语料和官网检索都没有找到相关内容。", "citations": [],
@@ -858,11 +872,7 @@ def _answer_uncached(q, emit=None):
                     "citations": [], "notice": "以上位置信息来自校园地图底座，仅供参考。",
                     "expanded": res["expanded"], "places": P, "year_note": yn}
         if P["options"]:
-            # 只说了类别（"食堂在哪"）：给出候选清单本身就是答案
-            return {"ok": True, "mode": "place", "question": q,
-                    "answer": _options_answer(P), "citations": [],
-                    "notice": "位置信息来自校园地图底座；开放时间、窗口办理等以现场公示为准。",
-                    "expanded": res["expanded"], "places": P, "year_note": yn}
+            return _options_reply(q, P, res["expanded"], yn)
         weblearn.log_miss(q, "llm-refused:no-place",
                           groups[0]["best"].get("score", 0),
                           groups[0]["best"].get("coverage", 0))
@@ -1138,6 +1148,37 @@ def _tree_data():
     return {"years": years, "total": len(docs)}
 
 
+def _chunks_for_stream(text, size=24):
+    """把整段答案切成 ~24 字的小块，供缓存命中的流式回放使用。"""
+    parts = re.findall(r"[^。；！？\n]*[。；！？\n]?", text or "")
+    out, buf = [], ""
+    for p in parts:
+        if not p:
+            continue
+        buf += p
+        if len(buf) >= size:
+            out.append(buf)
+            buf = ""
+    if buf:
+        out.append(buf)
+    return out
+
+
+def _replay_stream(res, emit):
+    """缓存命中也按 meta → delta → final 三事件发，协议保持一致。
+
+    缓存命中说明这个问题刚被问过，答案本该秒出，所以一块接一块地推、
+    不插延时；但事件结构必须完整——只发一个 final 的话，任何按 SSE
+    标准解析的客户端（含外部评审脚本）都会判成"没有流式"。
+    """
+    emit({"type": "meta", "mode": res.get("mode") or "retrieval",
+          "citations": _slim_cites(res.get("citations")),
+          "year_note": res.get("year_note") or "",
+          "expanded": res.get("expanded") or []})
+    for piece in _chunks_for_stream(res.get("answer") or ""):
+        emit({"type": "delta", "t": piece})
+
+
 def answer(q, emit=None):
     """带进程内 LRU 缓存的问答入口；拒答和异常结果不缓存。"""
     global _CACHE_HITS, _TOTAL_IN, _TOTAL_CACHED, _TOTAL_OUT, _USAGE_CALLS
@@ -1150,6 +1191,8 @@ def answer(q, emit=None):
         result = _copy_result(cached)
         result["usage"] = {"in": 0, "cached": 0, "out": 0}
         result["cached"] = True
+        if emit:
+            _replay_stream(result, emit)
         return result
     llm.LAST_USAGE.clear()
     result = _answer_uncached(q, emit)

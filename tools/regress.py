@@ -115,6 +115,11 @@ def check_ask(q, want):
     # 看前两条引用，不只看第一条：答案里标 [2] 是常态（首位文件常是"相邻但相关"的），
     # 只要前两条里有一条对上，就说明它确实读了该读的文件。
     titles = [c.get("title") or "" for c in cites[:2]]
+    # 首条是获奖名单/公示这类文书时，即使标题含关键词也不算答对：
+    # 公示里没有"能不能办、要什么材料"，拿它当依据等于没依据。
+    # （检索层早就有这条判断，问答层漏了，导致 C1"首条是奖学金公示"一直假 PASS。）
+    if titles and any(w in titles[0] for w in NON_RULE):
+        return False, "首条引用是文书不是规定：%.26s" % titles[0]
     hit = any(w in t for t in titles for w in want)
     return hit, ("引用%s %.28s" % ("对 " if hit else "错 ", titles[0]))
 
