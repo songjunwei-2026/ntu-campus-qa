@@ -288,7 +288,25 @@ def _unverified(answer, context):
     return [m.group() for m in NUM_UNIT.finditer(answer) if _norm(m.group()) not in ctx]
 
 
-def _group_hits(hits):
+_TITLE_IGNORE = {"南通", "通大", "大学"}
+
+
+def _title_hit(q, title):
+    """问题里有没有连续两个字出现在文件标题里。
+
+    用二字切片而不是分词：没有词典也能判断"转专页"这种错别字撞不撞得上
+    "转专业"标题，而"宿舍""休学"这类名词天然是二字词。
+    只看标题级命中——"宿舍"在正文里出现几百次，只有在标题里出现，
+    才说明这份文件整篇都在讲这件事。
+    """
+    if not title:
+        return 0
+    q2 = {q[i:i + 2] for i in range(len(q) - 1)}
+    t2 = {title[i:i + 2] for i in range(len(title) - 1)}
+    return len((q2 & t2) - _TITLE_IGNORE)
+
+
+def _group_hits(hits, q=None):
     """同一文档的多个命中块合并成一条引用。
 
     一篇办法里"奖学金类别"和"申请条件"常分在两段，只留一块就必然答偏。
@@ -306,7 +324,17 @@ def _group_hits(hits):
         g["items"].sort(key=lambda x: x["chunk"]["chunk_id"])
         g["ids"] = [x["chunk"]["chunk_id"] for x in g["items"]]
         g["text"] = "\n".join(_clean_ocr(x["chunk"]["text"]) for x in g["items"])
-    groups.sort(key=lambda g: -g["best"]["score"])
+    # 标题命中优先于分数。只看分数时，一篇长文档靠"条件""要求"这类高频词
+    # 就能把单块分数堆得很高，压住真正对口的那份办法：
+    # 问"转专页需要啥条件 绩点要求多少"，学籍管理规定 52 分排第一，
+    # 而标题里就写着"转专业"的实施办法只有 24 分排第五。
+    # 分两档而不是加权，是因为分数差一个量级时，任何系数都追不回来。
+    if q:
+        for g in groups:
+            g["th"] = _title_hit(q, g["best"]["chunk"].get("title") or "")
+        groups.sort(key=lambda g: (0 if g["th"] else 1, -g["best"]["score"]))
+    else:
+        groups.sort(key=lambda g: -g["best"]["score"])
     return groups
 
 
@@ -744,8 +772,8 @@ def _answer_uncached(q, emit=None):
                     "notice": "如确为校内场所，可能是地图库尚未收录，建议以现场指示牌或校方公布信息为准。",
                     "expanded": [], "places": P}
 
-    hits = R.search(q, top=6)
-    groups = _offscope(q, _group_hits(hits))[:MAX_GROUPS]
+    hits = R.search(q, top=12)
+    groups = _offscope(q, _group_hits(hits, q))[:MAX_GROUPS]
     if _intent_mismatch(q, groups):
         weblearn.log_miss(q, "intent-mismatch")
         return {"ok": False, "mode": "retrieval", "question": q,
@@ -1045,7 +1073,11 @@ def _keyword(q, n_files=3, n_clauses=3):
 
     files, seen = [], set()
     qchars_of = lambda s: sum(1 for ch in q if not ch.isspace() and ch in s)
-    for h in hits:
+    # 与问答链路用同一条排序规则：标题里就写着用户问的那件事的文件先排。
+    # 两条链路各排各的，用户点"关键词检索"和直接提问会看到不同的首份文件，
+    # 出处就不可信了。条款仍从完整 hits 里抽，不跟着丢块。
+    ordered = [g["best"] for g in _group_hits(hits, q)]
+    for h in ordered:
         c = h["chunk"]
         uid = c.get("doc_uid")
         if not uid or uid in seen:
