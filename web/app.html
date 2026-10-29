@@ -28,7 +28,7 @@ button{font-family:inherit}
 .brand-t{font:700 17px/1.3 var(--serif);letter-spacing:.05em;color:var(--navy)}
 .brand-s{font-size:11.5px;color:var(--ink-3);line-height:1.5}
 .nav{padding:6px 8px;flex:1;min-height:0;overflow:auto}
-.nav-item{position:relative;display:flex;align-items:center;gap:10px;width:100%;padding:9px 12px;margin-bottom:2px;border:0;border-radius:8px;background:transparent;color:var(--ink-2);font-size:14px;text-align:left;cursor:pointer;transition:background-color .14s,color .14s}
+.nav-item{position:relative;display:flex;align-items:center;gap:10px;width:100%;padding:9px 12px;margin-bottom:2px;border:0;border-radius:8px;background:transparent;color:var(--ink-2);font-size:14px;text-align:left;text-decoration:none;cursor:pointer;transition:background-color .14s,color .14s}
 .nav-item:hover{background:var(--hover)}
 .nav-item.on{background:var(--active);color:var(--navy);font-weight:600;box-shadow:0 1px 2px rgba(11,59,114,.08)}
 .nav-item.on:before{content:"";position:absolute;left:0;top:7px;bottom:7px;width:3px;border-radius:0 2px 2px 0;background:var(--red)}
@@ -41,7 +41,7 @@ button{font-family:inherit}
 .update-btn svg{width:15px;height:15px}
 .side-meta{margin-top:9px;font-size:11px;color:var(--ink-4);line-height:1.65}
 .side-meta b{color:var(--ink-3);font-weight:600}
-.side-row{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:7px}
+.side-row{display:flex;align-items:center;justify-content:flex-end;gap:8px;margin-top:7px}
 .side-link{display:inline-flex;align-items:center;gap:3px;font-size:11px;color:var(--ink-3);text-decoration:none}
 .side-link:hover{color:var(--navy)}
 .side-by{font-size:11px;color:var(--ink-4);white-space:nowrap}
@@ -225,6 +225,10 @@ mark{background:#FBEFB4;color:inherit;padding:0 1px;border-radius:2px}
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 5.5a1 1 0 0 1 1-1h4l1.8 2h9.2a1 1 0 0 1 1 1v11a1 1 0 0 1-1 1h-15a1 1 0 0 1-1-1z"/></svg>
       文件库
     </button>
+    <a class="nav-item" href="/map">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M9 4.2 3.5 6.4v13.4L9 17.6l6 2.2 5.5-2.2V4.2L15 6.4z"/><path d="M9 4.2v13.4M15 6.4v13.4"/></svg>
+      校园地图
+    </a>
   </nav>
   <div class="side-foot">
     <button class="update-btn" type="button" id="updateBtn">
@@ -233,7 +237,6 @@ mark{background:#FBEFB4;color:inherit;padding:0 1px;border-radius:2px}
     </button>
     <div class="side-meta" id="sideMeta">正在读取语料…</div>
     <div class="side-row">
-      <a class="side-link" href="/map" target="_blank" rel="noopener">校园地图 ↗</a>
       <span class="side-by" title="南通大学 人工智能 241 · 2442110394">宋君伟</span>
     </div>
   </div>
