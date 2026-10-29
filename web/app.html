@@ -105,6 +105,9 @@ main{flex:1;min-width:0;display:flex;flex-direction:column;height:100vh}
 .ref-title a{color:inherit;text-decoration:none;border-bottom:1px solid #DADADA}
 .ref-title a:hover{border-bottom-color:var(--ink-3)}
 .ref-meta{color:var(--ink-4);font-size:11.5px}
+/* 引用从"文件级"下压到"句级"：直接把命中的那句原文摆出来，不用点开整篇自己找 */
+.ref-quote{margin-top:7px;padding:7px 10px;border-left:2px solid var(--line-2);background:#FAFAFA;color:var(--ink-3);font-size:12px;line-height:1.8;
+  display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
 .skeleton{max-width:720px;margin:0 auto;padding:20px 0}
 .sk{height:13px;background:#F0F0F1;border-radius:4px;margin-bottom:11px;animation:pulse 1.3s ease-in-out infinite}
 .sk:nth-child(2){width:88%}.sk:nth-child(3){width:72%}
@@ -138,10 +141,25 @@ main{flex:1;min-width:0;display:flex;flex-direction:column;height:100vh}
 mark{background:#FBEFB4;color:inherit;padding:0 1px;border-radius:2px}
 .blank{padding:40px 0;text-align:center;color:var(--ink-4);font-size:13px}
 
+/* 年份错配提示：不改排序，只在结果上方说清楚 */
+.warn{margin:0 0 14px;padding:10px 12px;border:1px solid #E8D6A8;border-left:3px solid #B8860B;background:#FDF8E8;color:#6B5312;font-size:12.5px;line-height:1.75}
+/* 查不到时给的可点击建议问法 */
+.sug{display:block;width:100%;margin-bottom:6px;padding:9px 12px;border:1px solid var(--line-2);border-radius:3px;background:#fff;color:var(--ink-2);font-size:13px;line-height:1.6;text-align:left;cursor:pointer}
+.sug:hover{border-color:var(--brand);color:var(--navy);background:#F7FAFD}
+
 /* ---------- 文件库 ---------- */
 .tree-wrap{display:flex;height:100%;min-height:0}
 .tree{width:266px;flex:0 0 266px;border-right:1px solid var(--line);overflow-y:auto;padding:14px 10px}
 .tree-h{margin:0 0 12px;padding-left:10px;border-left:3px solid var(--red);color:var(--navy);font-size:12px;line-height:1.4;letter-spacing:.15em;font-weight:700}
+/* 文件库两种入口：按事项（默认，学生视角）／按年份（发文视角） */
+.tree-tabs{display:flex;margin:0 0 12px;border-bottom:1px solid var(--line)}
+.ttab{flex:1;padding:7px 0 8px;border:0;border-bottom:2px solid transparent;background:transparent;color:var(--ink-3);font-size:12.5px;letter-spacing:.06em;cursor:pointer}
+.ttab:hover{color:var(--ink-2)}
+.ttab.on{color:var(--navy);border-bottom-color:var(--red);font-weight:700}
+.topics{display:flex;flex-direction:column;gap:1px}
+.topic{display:flex;align-items:center;gap:8px;width:100%;padding:8px 9px;border:0;border-radius:7px;background:transparent;color:var(--ink-2);font-size:13px;text-align:left;cursor:pointer}
+.topic:hover{background:var(--hover)}
+.topic em{font-style:normal;margin-left:auto;flex:0 0 auto;color:var(--ink-4);font-size:11px}
 .yr{display:flex;align-items:center;gap:6px;width:100%;padding:7px 8px;border:0;border-radius:7px;background:transparent;color:var(--ink-2);font-size:13.5px;font-weight:600;text-align:left;cursor:pointer}
 .yr:hover{background:var(--hover)}
 .yr svg{width:12px;height:12px;flex:0 0 12px;transition:transform .16s;color:var(--ink-4)}
@@ -293,7 +311,10 @@ mark{background:#FBEFB4;color:inherit;padding:0 1px;border-radius:2px}
   <section class="view" id="view-tree">
     <div class="tree-wrap">
       <div class="tree">
-        <div class="tree-h">按年份 · 发文部门</div>
+        <div class="tree-tabs" role="tablist">
+          <button class="ttab on" type="button" data-tab="topic" role="tab" aria-selected="true">按事项</button>
+          <button class="ttab" type="button" data-tab="year" role="tab" aria-selected="false">按年份</button>
+        </div>
         <div id="treeBox"><div class="blank">正在载入…</div></div>
       </div>
       <div class="docs" id="docsBox">
@@ -322,7 +343,7 @@ const CHIPS=["6类论文的定义是什么？","破格评审需要什么条件�
 function setView(v){
   document.querySelectorAll(".nav-item").forEach(b=>b.classList.toggle("on",b.dataset.view===v));
   document.querySelectorAll(".view").forEach(s=>s.classList.toggle("on",s.id==="view-"+v));
-  if(v==="tree"&&!TREE.loaded)loadTree();
+  if(v==="tree")paintTree();
   if(v==="ask")setTimeout(()=>$("#askInput").focus(),60);
 }
 document.querySelector(".nav").addEventListener("click",e=>{
@@ -358,7 +379,7 @@ function groupRefs(cites){
   const map=new Map(),out=[];
   (cites||[]).forEach(c=>{
     const k=c.title||("文件 "+(c.no||""));
-    if(!map.has(k)){const g={title:k,dept:c.dept||"",date:c.date||"",url:c.url||"",source:c.source||"",nos:[]};map.set(k,g);out.push(g)}
+    if(!map.has(k)){const g={title:k,dept:c.dept||"",date:c.date||"",url:c.url||"",source:c.source||"",snippet:c.snippet||"",nos:[]};map.set(k,g);out.push(g)}
     map.get(k).nos.push(c.no);
   });
   return out.map((g,i)=>({...g,n:i+1}));
@@ -383,11 +404,13 @@ async function ask(){
       <div class="q-line"><div class="q-avatar">你</div><div class="q-text">${esc(q)}</div></div>
       <div class="a-block">
         <div class="a-head"><span class="a-mode">${esc(mode)}</span>${d.ok?'<span class="stamp">已核验</span>':''}</div>
+        ${d.year_note?`<div class="warn" style="margin:0 0 12px">${esc(d.year_note)}</div>`:""}
         <div class="a-text${d.ok?"":" a-empty"}">${body}</div>
         ${refs.length?`<div class="refs"><div class="refs-t">参考文件</div>${refs.map(g=>`
           <div class="ref" id="ref-${g.n}"><div class="ref-n">${g.n}</div><div class="ref-main">
             <div class="ref-title">${g.url?`<a href="${esc(g.url)}" target="_blank" rel="noopener">${esc(g.title)}</a>`:esc(g.title)}</div>
             <div class="ref-meta">${[g.dept,g.date].filter(Boolean).map(esc).join(" · ")||"出处未标注"}</div>
+            ${g.snippet?`<div class="ref-quote">${esc(g.snippet)}</div>`:""}
           </div></div>`).join("")}</div>`:""}
         ${d.notice?`<div class="ref-meta" style="margin-top:10px">${esc(d.notice)}</div>`:""}
       </div></div>`;
@@ -431,19 +454,34 @@ async function kw(){
     if(!r.ok)throw new Error();
     const d=await r.json();
     if(!d.ok||(!d.files.length&&!d.clauses.length)){
-      $("#kwOut").innerHTML='<div class="blank">没找到相关文件。换个说法试试，或到「智能问答」里完整描述。</div>';
+      const sug=(d.suggest||[]).slice(0,4);
+      // 分两种"没有"：一种是这几份文件都不够相关被拦下了，一种是压根没命中。
+      // 前一种更常见，要把话说明白——否则用户会以为学校没这个规定。
+      let h='<div class="blank">'+(d.reason==="low-relevance"
+        ? "没有足够相关的文件，就不拿它凑数了。<br>可能是问得太口语，也可能是这件事本来就不在制度文件里——换个更正式的说法试试，或者直接去「智能问答」把情况说完整。"
+        : "没找到相关文件。换个说法试试，或到「智能问答」里完整描述。")+'</div>';
+      if(sug.length){
+        h+=`<div class="sec-t" style="margin-top:22px">资料库里接近的问法 <em>${sug.length}</em></div>`;
+        h+=sug.map(s=>`<button class="sug" type="button" data-q="${esc(s.text)}">${esc(s.text)}</button>`).join("");
+      }
+      $("#kwOut").innerHTML=h;
+      $("#kwOut").querySelectorAll(".sug").forEach(b=>b.addEventListener("click",()=>{
+        $("#kwInput").value=b.dataset.q;
+        kw();
+      }));
       return;
     }
-    let html=`<div class="sec-t">最相关的文件 <em>${d.files.length} 个</em></div>`;
+    let html=d.year_note?`<div class="warn">${esc(d.year_note)}</div>`:"";
+    html+=`<div class="sec-t">最相关的文件 <em>${d.files.length} 个</em></div>`;
     html+=d.files.map((f,i)=>`<div class="card">
       <div class="card-h"><div class="card-n">${i+1}</div><div class="card-t">${f.url?`<a href="${esc(f.url)}" target="_blank" rel="noopener">${esc(f.title)}</a>`:esc(f.title)}</div></div>
-      <div class="card-m">${[f.dept,f.date].filter(Boolean).map(esc).join(" · ")||"出处未标注"}</div>
+      <div class="card-m">${[f.dept,f.date].filter(Boolean).map(esc).join(" · ")||"出处未标注"}${f.snippet_no?` · 摘自上文第 ${f.snippet_no} 句`:""}</div>
       <div class="card-s">${esc(f.snippet||"")}</div>
     </div>`).join("");
     html+=`<div class="sec-t" style="margin-top:24px">最相关的条款 <em>${d.clauses.length} 条</em></div>`;
     html+=d.clauses.map(c=>`<div class="clause">
       <div class="clause-t">${markClause(c.text,q)}</div>
-      <div class="clause-m">出处：${esc(c.title)}${[c.dept,c.date].filter(Boolean).length?" · "+[c.dept,c.date].filter(Boolean).map(esc).join(" · "):""}</div>
+      <div class="clause-m">出处：${esc(c.title)}${[c.dept,c.date].filter(Boolean).length?" · "+[c.dept,c.date].filter(Boolean).map(esc).join(" · "):""}${c.sent_no?` · 第 ${c.sent_no} 段`:""}</div>
     </div>`).join("");
     $("#kwOut").innerHTML=html;
   }catch(e){
@@ -452,17 +490,46 @@ async function kw(){
 }
 
 /* ---------- 文件库 ---------- */
-const TREE={loaded:false,data:null};
+const TREE={loaded:false,data:null,tab:"topic"};
+
+/* 事项视角：学生知道自己要办什么事，但不知道这事归教务处还是学院、哪一年发的文。
+   每个事项绑定一组检索词，点进去直接走条款检索——比让人对着年份树猜有用。 */
+const TOPICS=[
+  {n:"转专业",q:"转专业 条件 名额 考核",h:"教务处"},
+  {n:"考试与成绩",q:"课程考核 缓考 补考 重修 成绩",h:"教务处"},
+  {n:"毕业与学位",q:"学位授予 毕业 学位外语 结业",h:"教务处"},
+  {n:"推免读研",q:"推免 推荐免试 研究生招生",h:"研究生院"},
+  {n:"奖助学金",q:"奖学金 助学金 国家励志奖学金 评定",h:"学生工作处"},
+  {n:"评奖评优",q:"评奖评优 荣誉称号 三好学生 优秀学生干部",h:"学生工作处"},
+  {n:"助学贷款",q:"国家助学贷款 还款 代偿",h:"学生工作处"},
+  {n:"违纪处分",q:"违纪处分 考试纪律 申诉",h:"学生工作处"},
+  {n:"休学复学",q:"休学 复学 退学 学籍异动",h:"教务处"},
+  {n:"公寓住宿",q:"公寓 宿舍 住宿 安全用电 查寝",h:"后勤保障部"},
+  {n:"实习实践",q:"实习 实践 实训 基地",h:"教务处"},
+  {n:"出国交流",q:"交流 出国 访学 学分互认",h:"国际交流处"},
+];
+
+function paintTopics(){
+  $("#treeBox").innerHTML='<div class="topics">'+TOPICS.map((t,i)=>
+    `<button class="topic" type="button" data-i="${i}">${esc(t.n)}<em>${esc(t.h||"")}</em></button>`
+  ).join("")+'</div>';
+}
+
 async function loadTree(){
   try{
     const r=await fetch("/api/tree");if(!r.ok)throw new Error();
     TREE.data=await r.json();TREE.loaded=true;
-    paintTree();
+    if(TREE.tab==="year")paintYearTree();
   }catch(e){
     $("#treeBox").innerHTML='<div class="blank">文件库读取失败</div>';
   }
 }
 function paintTree(){
+  if(TREE.tab==="topic")return paintTopics();
+  if(!TREE.loaded)return loadTree();
+  paintYearTree();
+}
+function paintYearTree(){
   const ys=TREE.data.years||[];
   if(!ys.length){$("#treeBox").innerHTML='<div class="blank">暂无文件</div>';return}
   $("#treeBox").innerHTML=ys.map((y,i)=>`
@@ -474,7 +541,26 @@ function paintTree(){
       ${y.depts.map((d,j)=>`<button class="dp" type="button" data-i="${i}" data-j="${j}" title="${esc(d.name)}"><span class="dp-n">${esc(d.name)}</span><em>${d.count}</em></button>`).join("")}
     </div>`).join("");
 }
+document.querySelector(".tree-tabs").addEventListener("click",e=>{
+  const b=e.target.closest(".ttab");if(!b)return;
+  TREE.tab=b.dataset.tab;
+  document.querySelectorAll(".ttab").forEach(x=>{
+    const on=x===b;
+    x.classList.toggle("on",on);
+    x.setAttribute("aria-selected",String(on));
+  });
+  paintTree();
+});
 $("#treeBox").addEventListener("click",e=>{
+  // 事项入口：点一下就把检索词填好并切到条款检索，少一次"我该搜什么"的犹豫
+  const tp=e.target.closest(".topic");
+  if(tp){
+    const t=TOPICS[Number(tp.dataset.i)];
+    setView("keyword");
+    $("#kwInput").value=t.q;
+    kw();
+    return;
+  }
   const y=e.target.closest(".yr");
   if(y){
     const i=y.dataset.i,open=y.getAttribute("aria-expanded")==="true";

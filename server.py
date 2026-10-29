@@ -748,6 +748,10 @@ def _answer_uncached(q):
             "bm25": round(g["best"]["bm25"], 2),
             "snippet": _extract_snippet(q, g["text"]),
             "evidence": g["text"],
+            # 条款级定位：chunk_id 是这段话在文件里的块号，ids 是同一文件命中的全部块。
+            # 前端靠这两个把"出处"从「某文件」压到「某段」，用户不用打开整篇自己找。
+            "chunk_id": c.get("chunk_id"),
+            "ids": g.get("ids") or [],
         })
 
     res = {
@@ -759,6 +763,8 @@ def _answer_uncached(q):
         "citations": citations,
         "notice": "",
         "expanded": groups[0]["best"]["expanded"],
+        # 问题写明年份、命中文件却全是别的年份时，前端要在答案上方挂提示
+        "year_note": _year_note(q, hits),
         "places": P,
     }
 
@@ -776,6 +782,9 @@ def _answer_uncached(q):
     if _is_refusal(text):
         # 真拒答了。不重试本地上下文：命中率高不等于文档真的回答了问题。
         # 但本地没有 ≠ 官网没有，先联网找一轮再说。
+        # 拒答时也把年份差异带上：问 2025 年而库里只有 2026 年时，
+        # "没有"之外还得让用户知道"有别的年份的"，否则等于什么都没说。
+        yn = _year_note(q, hits)
         web = _web_answer(q, P, res["expanded"])
         if web:
             return web
@@ -788,20 +797,20 @@ def _answer_uncached(q):
             return {"ok": False, "mode": "place", "question": q,
                     "answer": "政策文件里没有查到相关规定；不过 %s" % _place_answer(p, P.get("room")),
                     "citations": [], "notice": "以上位置信息来自校园地图底座，仅供参考。",
-                    "expanded": res["expanded"], "places": P}
+                    "expanded": res["expanded"], "places": P, "year_note": yn}
         if P["options"]:
             # 只说了类别（"食堂在哪"）：给出候选清单本身就是答案
             return {"ok": True, "mode": "place", "question": q,
                     "answer": _options_answer(P), "citations": [],
                     "notice": "位置信息来自校园地图底座；开放时间、窗口办理等以现场公示为准。",
-                    "expanded": res["expanded"], "places": P}
+                    "expanded": res["expanded"], "places": P, "year_note": yn}
         weblearn.log_miss(q, "llm-refused:no-place",
                           groups[0]["best"].get("score", 0),
                           groups[0]["best"].get("coverage", 0))
         return {"ok": False, "mode": "llm", "question": q,
                 "answer": "本地语料和官网检索都没有找到相关内容，建议咨询相关职能部门。",
                 "citations": [], "notice": "", "expanded": res["expanded"],
-                "places": P}
+                "places": P, "year_note": yn}
 
     bad = _unverified(text, ctx)
     if bad:
@@ -812,6 +821,12 @@ def _answer_uncached(q):
     res["mode"] = "llm"
     res["answer"] = _truncate_answer(_drop_marker(text))
     return res
+
+
+# 关键词检索的弱相关门槛。实测：正常问题首条 score 在 27–62，
+# 语料外的问法在 5–13（"快递驿站几点关门"5.5、"教务处窗口几点"13.1）。
+# 取 15 留一点余量；这个数是绝对分，换了语料要重新标定。
+WEAK_SCORE = 15
 
 
 def _split_sent(text):
@@ -830,11 +845,95 @@ def _split_sent(text):
     return out[:24]
 
 
+def _year_note(q, hits):
+    """问题里写明了年份、但排在首位的文件是别的年份时提醒一句。
+
+    「2026年国庆放假调课」的首条是 2024 年通知：字符全中、年份全错，
+    用户拿到的是一份过期安排。这种情况不改排序——因为"调课"这个词
+    确实只出现在旧文件里，强行翻转会把正常的长尾查询也带偏——
+    改为在答案上方明说，让用户自己判断。
+    """
+    m = re.search(r"(20\d{2})\s*年", q or "")
+    if not m or not hits:
+        return ""
+    want = int(m.group(1))
+    c = hits[0]["chunk"]
+    y = c.get("year")
+    if not str(y or "").isdigit():
+        dt = str(c.get("date") or "")[:4]
+        y = int(dt) if dt.isdigit() else 0
+    if y and int(y) != want:
+        # 不判断谁更权威：可能是库里缺你要的年份，也可能你要的年份本就还没发文。
+        # 只把差异摆出来，判断交给用户。
+        return "排在最前的是 %d 年的文件，不是你问的 %d 年。请确认这份是否适用于你要办的时间段；" \
+               "如需 %d 年的文件，建议查学校官网最新发布。" % (int(y), want, want)
+    return ""
+
+
+# 一句话问好几件事时的切分点。只在首次检索被判弱相关时才用，
+# 所以宁可切得粗一点，也不要影响本来问得好好的单意图查询。
+SPLIT_PAT = re.compile(r"顺便|另外|还有|以及|同时|再问|想问下|想问|然后|，|,|；|;|、|\s+")
+
+
+def _split_intents(q):
+    """把"挂科了还能评优吗顺便问下重修费多少"拆成两件事。
+
+    整串丢给 BM25 时，每件事的词都在互相稀释，覆盖率上不去，
+    最后被弱相关判据一刀切掉——本来是问得很具体的问题，却什么也没得到。
+    """
+    parts = [p.strip() for p in SPLIT_PAT.split(q or "") if len(p.strip()) >= 3]
+    return parts[:3] if len(parts) > 1 else [q]
+
+
+def _weak(q, hits):
+    """首条是不是硬凑来的。判定依据见 _keyword 里的注释。"""
+    if not hits:
+        return True
+    top = hits[0]
+    qchars = {ch for ch in q if not ch.isspace()}
+    title_hits = len(qchars & set(top["chunk"].get("title") or ""))
+    return top["score"] < WEAK_SCORE or (top["coverage"] < 0.55 and title_hits < 2)
+
+
 def _keyword(q, n_files=3, n_clauses=3):
     """关键词检索：最相关的 N 个文件 + N 个条款（条款=命中块里的原句）。"""
     hits = R.search(q, top=48)
+
+    # 整串检索不成，先看看是不是一次问了好几件事：拆开分头找再合并。
+    # 拆开能找到东西就直接放行——整串判弱是因为几件事互相稀释，
+    # 不代表每一件都查不到，用原始长查询再判一次等于把刚救回来的又扔掉。
+    recovered = False
+    if _weak(q, hits):
+        parts = _split_intents(q)
+        if len(parts) > 1:
+            pool = {}
+            for p in parts:
+                # 太短的碎片（"暑假开吗""面试难吗"）单独拿去检索一定跑偏，
+                # 宁可少答一件，也不要把无关文件混进来。
+                if len(p.strip()) < 5:
+                    continue
+                for h in R.search(p, top=12):
+                    k = (h["chunk"].get("doc_uid"), h["chunk"].get("chunk_id"))
+                    if k not in pool or h["score"] > pool[k]["score"]:
+                        pool[k] = h
+            if pool:
+                hits = sorted(pool.values(), key=lambda x: -x["score"])
+                recovered = True
+
     if not hits:
-        return {"ok": False, "files": [], "clauses": []}
+        return {"ok": False, "files": [], "clauses": [], "reason": "no-hit",
+                "suggest": suggest(q, 4)["items"]}
+
+    # 弱相关兜底：宁可说没找到，也不把无关文件端上去。
+    # 两个条件都要看，任一个单独都不够准：
+    #   score 过低 —— "快递驿站几点关门"首条只有 5.5，正常问题在 27 以上；
+    #   标题对不上 —— "退役军人转专业"首条是兵役登记规定，只碰上"役"一个字。
+    # 标题看"命中几个字"而不是覆盖率：多意图的长查询（"转专页…绩点…面试…"）
+    # 按比例算必然很低，那样会把问对的问题也一起拒掉。
+    if _weak(q, hits) and not recovered:
+        weblearn.log_miss(q, "keyword-weak", hits[0]["score"], hits[0]["coverage"])
+        return {"ok": False, "files": [], "clauses": [], "reason": "low-relevance",
+                "suggest": suggest(q, 4)["items"]}
 
     files, seen = [], set()
     qchars_of = lambda s: sum(1 for ch in q if not ch.isspace() and ch in s)
@@ -857,6 +956,9 @@ def _keyword(q, n_files=3, n_clauses=3):
             "url": c.get("url") or "",
             "source": c.get("source") or "",
             "score": h["score"],
+            "chunk_id": c.get("chunk_id"),
+            # 摘要所在原句在本文中的序号，前端据此定位到条款
+            "snippet_no": next((i for i, s in enumerate(sents, 1) if s == best), 1),
             "snippet": best,
         })
         if len(files) >= n_files:
@@ -866,7 +968,8 @@ def _keyword(q, n_files=3, n_clauses=3):
     clauses, used = [], set()
     for h in hits:
         c = h["chunk"]
-        for s in _split_sent(c.get("text") or ""):
+        sents = _split_sent(c.get("text") or "")
+        for si, s in enumerate(sents, 1):
             hit_n = sum(1 for ch in qchars if ch in s)
             if hit_n < 2:
                 continue
@@ -881,13 +984,19 @@ def _keyword(q, n_files=3, n_clauses=3):
                 "date": c.get("date") or "",
                 "url": c.get("url") or "",
                 "uid": c.get("doc_uid") or "",
+                # 条款级定位：文件内第几块、第几段。有了这两个数，
+                # 前端才能把"出处"从文件级往下压到具体那一句。
+                "chunk_id": c.get("chunk_id"),
+                "sent_no": si,
+                "no": len(clauses) + 1,
             })
             if len(clauses) >= n_clauses:
                 break
         if len(clauses) >= n_clauses:
             break
 
-    return {"ok": True, "q": q, "files": files, "clauses": clauses}
+    return {"ok": True, "q": q, "files": files, "clauses": clauses,
+            "year_note": _year_note(q, hits)}
 
 
 def _tree_data():
