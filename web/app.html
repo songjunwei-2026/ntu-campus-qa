@@ -89,6 +89,7 @@ main{flex:1;min-width:0;display:flex;flex-direction:column;height:100vh}
 .a-head{display:flex;align-items:center;gap:9px;margin-bottom:9px}
 .a-mode{display:inline-flex;align-items:center;gap:5px;padding:2px 8px;border-radius:5px;background:#EDF2F8;color:#5B7391;font-size:11px;line-height:1.7}
 .stamp{flex:0 0 auto;white-space:nowrap;padding:2px 7px 1px;border:1px solid var(--red);box-shadow:inset 0 0 0 1.5px #fff,inset 0 0 0 2.5px var(--red);color:var(--red);font:700 11px/1.3 var(--serif);letter-spacing:.12em;transform:rotate(-5deg);opacity:.9}
+.stamp.raw{border-color:var(--ink-4);box-shadow:inset 0 0 0 1.5px #fff,inset 0 0 0 2.5px var(--ink-4);color:var(--ink-3);letter-spacing:.06em}
 .a-text{font-size:15px;line-height:1.95;color:var(--ink);white-space:pre-wrap;word-break:break-word}
 .a-text .num{color:var(--navy);font-weight:700}
 .a-text .cite{color:var(--red);font-size:11px;font-weight:700;text-decoration:none;vertical-align:super;line-height:0;margin:0 1px;padding:0 1px}
@@ -379,7 +380,8 @@ function groupRefs(cites){
   const map=new Map(),out=[];
   (cites||[]).forEach(c=>{
     const k=c.title||("文件 "+(c.no||""));
-    if(!map.has(k)){const g={title:k,dept:c.dept||"",date:c.date||"",url:c.url||"",source:c.source||"",snippet:c.snippet||"",nos:[]};map.set(k,g);out.push(g)}
+    if(!map.has(k)){const g={title:k,dept:c.dept||"",date:c.date||"",url:c.url||"",source:c.source||"",snippet:c.snippet||"",chunk:c.chunk_id==null?null:c.chunk_id,sent:c.sent_no||null,nos:[]};map.set(k,g);out.push(g)}
+    else{const g=map.get(k);if(g.chunk==null&&c.chunk_id!=null){g.chunk=c.chunk_id;g.sent=c.sent_no||null}}
     map.get(k).nos.push(c.no);
   });
   return out.map((g,i)=>({...g,n:i+1}));
@@ -390,26 +392,32 @@ async function ask(){
   const btn=$("#askSend");btn.disabled=true;
   $("#askEmpty").hidden=true;
   const th=$("#thread");th.hidden=false;
-  th.insertAdjacentHTML("beforeend",`<div class="turn" id="pending"><div class="q-line"><div class="q-avatar">你</div><div class="q-text">${esc(q)}</div></div><div class="a-block"><div class="skeleton"><div class="sk"></div><div class="sk"></div><div class="sk"></div></div><div class="sk-hint">正在检索 ${STAT.chunks||"相关"} 段原文…</div></div></div>`);
+  th.insertAdjacentHTML("beforeend",`<div class="turn" id="pending"><div class="q-line"><div class="q-avatar">你</div><div class="q-text">${esc(q)}</div></div><div class="a-block"><div class="skeleton"><div class="sk"></div><div class="sk"></div><div class="sk"></div></div><div class="sk-hint" id="skHint">正在检索原文…</div></div></div>`);
   th.scrollIntoView({block:"end",behavior:"smooth"});
+  let tick=0;
+  const timer=setInterval(()=>{
+    tick++;
+    const h=document.querySelector("#skHint");
+    if(h)h.textContent=`正在检索原文并核对（已用 ${tick}s）…`;
+  },1000);
   try{
     const r=await fetch("/api/ask",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({q})});
     if(!r.ok)throw new Error();
     const d=await r.json();
     const refs=groupRefs(d.citations);
     const noMap={};refs.forEach(g=>g.nos.forEach(n=>noMap[n]=g.n));
-    const mode={llm:"模型归纳 · 依据原文",web:"联网检索 · 源自官网",place:"校园地点 · 位置信息"}[d.mode]||"原文摘录";
+    const mode={llm:"模型归纳 · 依据原文",web:"联网检索 · 源自官网",place:"校园地点 · 位置信息",gap:"语料未覆盖"}[d.mode]||"原文摘录";
     const body=d.answer?highlight(d.answer,noMap):"现有文件中未涉及这个问题。";
     $("#pending").outerHTML=`<div class="turn">
       <div class="q-line"><div class="q-avatar">你</div><div class="q-text">${esc(q)}</div></div>
       <div class="a-block">
-        <div class="a-head"><span class="a-mode">${esc(mode)}</span>${d.ok?'<span class="stamp">已核验</span>':''}</div>
+        <div class="a-head"><span class="a-mode">${esc(mode)}</span>${d.ok&&!d.degraded?'<span class="stamp">已核验</span>':''}${d.degraded?'<span class="stamp raw">原文摘录</span>':''}</div>
         ${d.year_note?`<div class="warn" style="margin:0 0 12px">${esc(d.year_note)}</div>`:""}
         <div class="a-text${d.ok?"":" a-empty"}">${body}</div>
         ${refs.length?`<div class="refs"><div class="refs-t">参考文件</div>${refs.map(g=>`
           <div class="ref" id="ref-${g.n}"><div class="ref-n">${g.n}</div><div class="ref-main">
             <div class="ref-title">${g.url?`<a href="${esc(g.url)}" target="_blank" rel="noopener">${esc(g.title)}</a>`:esc(g.title)}</div>
-            <div class="ref-meta">${[g.dept,g.date].filter(Boolean).map(esc).join(" · ")||"出处未标注"}</div>
+            <div class="ref-meta">${[g.dept,g.date].filter(Boolean).map(esc).join(" · ")||"出处未标注"}${g.chunk==null?"":` · 第 ${g.chunk+1} 段${g.sent?` 第 ${g.sent} 句`:""}`}</div>
             ${g.snippet?`<div class="ref-quote">${esc(g.snippet)}</div>`:""}
           </div></div>`).join("")}</div>`:""}
         ${d.notice?`<div class="ref-meta" style="margin-top:10px">${esc(d.notice)}</div>`:""}
@@ -417,6 +425,7 @@ async function ask(){
   }catch(e){
     $("#pending").outerHTML=`<div class="turn"><div class="q-line"><div class="q-avatar">你</div><div class="q-text">${esc(q)}</div></div><div class="a-block"><div class="a-text a-empty">服务暂不可用，请稍后重试。</div></div></div>`;
   }finally{
+    clearInterval(timer);
     btn.disabled=false;$("#askInput").value="";
     $("#askBody").scrollTop=$("#askBody").scrollHeight;
     th.lastElementChild.scrollIntoView({block:"nearest",behavior:"smooth"});

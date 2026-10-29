@@ -311,12 +311,17 @@ def _group_hits(hits):
 
 
 def _offscope(q, groups):
-    """用户没提研究生，就别把研究生规定混进答案——本机用户默认是本科生。"""
+    """用户没提研究生，就别把研究生规定混进答案——本机用户默认是本科生。
+
+    标题里"研究生"三个字不一定是这么写的：问"学士学位授予"曾带回
+    《博士、硕士学位授予点设置调整优化实施细则》——它写的是"硕士"，不是"研究生"，
+    只按"研究生"三个字筛等于没筛。研究层次按整套词过滤。
+    """
     if re.search(r"研究生|硕士|博士|考研|推免|保研", q):
         return groups
     kept = [g for g in groups
-            if not ("研究生" in g["best"]["chunk"]["title"]
-                    and "本科" not in g["best"]["chunk"]["title"])]
+            if not (re.search(r"研究生|硕士|博士", g["best"]["chunk"]["title"])
+                    and not re.search(r"本科|学士|专科", g["best"]["chunk"]["title"]))]
     return kept or groups
 
 
@@ -357,6 +362,8 @@ def _intent_mismatch(q, groups):
 
 MAX_DOC_CHUNKS = 8    # 短文档整篇喂，长文档用命中块 ±2 段
 CTX_RADIUS = 2        # 关键条款常被切在下一段，邻块给宽一点
+HEAD_CHUNKS = 2       # 长文档固定带文件开头：处分种类、期限这类总则条款都在第 1–2 段
+CTX_MAX_CHARS = 4200  # 单篇送进上下文的正文上限，按块累加
 MAX_GROUPS = 4        # 只把前 4 篇交给模型，控制上下文长度
 
 
@@ -365,12 +372,35 @@ def _doc_chunk_ids(g):
 
     整篇喂只对短文档做：课程考核办法那种 16 段的长文件整篇塞进去，
     上下文会被稀释，模型反而答不出来，所以长文档退回"命中块 ±2 段"。
+
+    但只给"命中块 ±2 段"会漏掉文件开头的总则条款。问"处分多久能解除"，
+    命中第 5 段的处理流程，"记过 10 个月"写在第 1 段的处分种类表里；
+    模型看不到就答"原文未写明"，同时又把这份文件列进引用——自相矛盾。
+    所以长文档补上开头两块，再按字符预算由近及远补邻块。
     """
     uid = g["best"]["chunk"]["doc_uid"]
     chunks = R.by_doc.get(uid, {})
     if len(chunks) <= MAX_DOC_CHUNKS:
         return sorted(chunks), 0
-    return g["ids"], CTX_RADIUS
+
+    used = [cid for cid in sorted(chunks)[:HEAD_CHUNKS]]
+    chars = sum(len(chunks[cid].get("text") or "") for cid in used)
+    near = []
+    for cid in sorted(set(g["ids"])):
+        near.append(cid)
+        for d in range(1, CTX_RADIUS + 1):
+            near.append(cid + d)
+            near.append(cid - d)
+    seen = set(used)
+    for cid in near:
+        if cid in seen or cid not in chunks:
+            continue
+        n = len(chunks[cid].get("text") or "")
+        if chars + n > CTX_MAX_CHARS and len(seen) > HEAD_CHUNKS:
+            continue
+        seen.add(cid)
+        chars += n
+    return sorted(seen), 0
 
 
 def _build_context(groups):
@@ -734,6 +764,8 @@ def _answer_uncached(q):
     citations = []
     for n, g in enumerate(groups, 1):
         c = g["best"]["chunk"]
+        snippet = _extract_snippet(q, g["text"])
+        loc_chunk, loc_sent = _locate_sent(g, snippet)
         citations.append({
             "no": n,
             "title": c["title"],
@@ -746,11 +778,13 @@ def _answer_uncached(q):
             "relevance": round(g["best"]["score"] / top_score, 3),
             "score": round(g["best"]["score"], 2),
             "bm25": round(g["best"]["bm25"], 2),
-            "snippet": _extract_snippet(q, g["text"]),
+            "snippet": snippet,
             "evidence": g["text"],
-            # 条款级定位：chunk_id 是这段话在文件里的块号，ids 是同一文件命中的全部块。
-            # 前端靠这两个把"出处"从「某文件」压到「某段」，用户不用打开整篇自己找。
-            "chunk_id": c.get("chunk_id"),
+            # 条款级定位：文档号 + 块号 + 第几句。前端凭这三个把"出处"
+            # 从「某文件」压到「第几段第几句」，学生不用打开整篇自己找。
+            "doc_uid": c.get("doc_uid") or "",
+            "chunk_id": loc_chunk,
+            "sent_no": loc_sent,
             "ids": g.get("ids") or [],
         })
 
@@ -773,9 +807,22 @@ def _answer_uncached(q):
         return res
 
     ctx = _build_context(groups)
+
+    # 语料里根本没有的专有名词：模型看不到它，写出来的只可能是编的。
+    gaps = _gap_terms(q, ctx)
+    if gaps:
+        weblearn.log_miss(q, "corpus-gap")
+        return {"ok": False, "mode": "gap", "question": q,
+                "answer": "资料库里没有关于「%s」的内容，无法给出有出处的答案。" % "、".join(gaps[:2]),
+                "citations": [], "notice": "这类信息通常不在校级发文里，建议查学校官网或咨询对应部门。",
+                "expanded": res["expanded"], "places": P, "year_note": _year_note(q, hits)}
+
     try:
         text = llm.chat(q, ctx, CFG)
     except Exception as e:
+        # 降级成原文摘录时不能算"已核验"：摘录只是把命中的原文摆出来，
+        # 它到底有没有回答问题没人核对过。前端据此不盖核验章。
+        res["degraded"] = True
         res["notice"] = "模型调用失败，已回退为原文摘录（%s）。" % e
         return res
 
@@ -883,6 +930,45 @@ def _split_intents(q):
     """
     parts = [p.strip() for p in SPLIT_PAT.split(q or "") if len(p.strip()) >= 3]
     return parts[:3] if len(parts) > 1 else [q]
+
+
+def _locate_sent(g, snippet):
+    """片段落在同一文件的哪一块、第几句。
+
+    引用只到"某文件"时，学生要打开整篇自己找；给出块号加句号，
+    才能说"就是这句，你自己看"。句子可能来自命中的任意一块，
+    所以在整篇里找，不能拿"命中块拼起来的文本"数句号——
+    那样算出来的第 18 句，在原文第 6 块里根本不存在。
+    """
+    key = (snippet or "").strip()[:16]
+    if not key:
+        return g["best"]["chunk"].get("chunk_id"), None
+    idx = R.by_doc.get(g["best"]["chunk"].get("doc_uid"), {})
+    for cid, item in sorted(idx.items()):
+        for i, s in enumerate(_split_sent(item.get("text") or ""), 1):
+            if key in s:
+                return cid, i
+    return g["best"]["chunk"].get("chunk_id"), None
+
+
+# 只在语料里"根本不存在"的专有名词才拦：IPv6、CET-4、APP 名这类。
+# 纯中文缺口交给 _weak 与模型拒答判断，避免把口语说法一起拦掉。
+_ASCII_TOKEN = re.compile(r"[A-Za-z][A-Za-z0-9\.\-]{2,}|\d+[A-Za-z]{2,}")
+
+
+def _gap_terms(q, ctx):
+    """问题里那些模型根本没机会看到的专有名词。
+
+    "校园网IPv6怎么开通"——全库 0 个块含 IPv6，模型却照着"校园网"三个字
+    编了 300 字开通流程，四条引用全与 IPv6 无关，前端还盖了"已核验"。
+    这类词只可能是用户从别处听来的：语料里没有就是没有，宁可说查不到。
+    """
+    low = (ctx or "").lower()
+    out = []
+    for t in _ASCII_TOKEN.findall(q or ""):
+        if t.lower() not in low and t not in out:
+            out.append(t)
+    return out
 
 
 def _weak(q, hits):
