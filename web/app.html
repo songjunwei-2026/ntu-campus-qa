@@ -225,7 +225,11 @@ mark{background:#FBEFB4;color:inherit;padding:0 1px;border-radius:2px}
 
 /* ---------- 窄屏 ---------- */
 @media(max-width:820px){
-  body{flex-direction:column}
+  /* 窄屏必须锁住视口高度，让 main 内部滚动。
+     原来写 main{height:auto}，高度跟着内容走，首页 10 条示例把整页拉到
+     约 1100px，底部输入框被挤出 844px 视口——首页最重要的入口反而要滚动才看得到。 */
+  body{flex-direction:column;height:100vh;height:100dvh;overflow:hidden}
+  .side{max-height:52vh;overflow-y:auto}
   .side{width:100%;flex:0 0 auto;border-right:0;border-bottom:1px solid var(--line)}
   .brand{padding:12px 14px 8px}
   .logo{width:38px;height:38px;flex:0 0 38px;border-radius:8px;font-size:13px}
@@ -236,7 +240,7 @@ mark{background:#FBEFB4;color:inherit;padding:0 1px;border-radius:2px}
   .nav-item{width:auto;flex:0 0 auto;padding:7px 12px;font-size:13px}
   .nav-item svg{display:none}
   .side-foot{display:none}
-  main{height:auto;flex:1}
+  main{height:0;flex:1;min-height:0}
   .empty{padding-top:40px}
   .tree-wrap{flex-direction:column}
   .tree{width:100%;flex:0 0 auto;max-height:40vh;border-right:0;border-bottom:1px solid var(--line)}
@@ -360,7 +364,24 @@ mark{background:#FBEFB4;color:inherit;padding:0 1px;border-radius:2px}
 <script>
 const $=s=>document.querySelector(s);
 const esc=v=>String(v==null?"":v).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
-const CHIPS=["6类论文的定义是什么？","破格评审需要什么条件？","转专业需要什么条件？","科研经费怎么报销？"];
+/* 首页示例问法。按学生事务的实际咨询频次排，不是随机挑选：
+   奖助、转专业、保研、挂科、毕业学分这几类在每个学校都是咨询量最大的，
+   请假、助学贷款、作弊处分、学位证次之。
+   每一条都在 /api/keyword 上实测过能命中对应文件，不摆查不到的题——
+   点了就问不出答案，比不给示例更伤人。改这几条时请一并重跑
+   _archive/probe_chips2.py 验证。 */
+const CHIPS=[
+  "国家奖学金怎么申请",
+  "奖学金什么时候发",
+  "转专业需要什么条件",
+  "保研需要什么条件",
+  "必修课不及格怎么办",
+  "毕业要修满多少学分",
+  "请假要办什么手续",
+  "助学贷款怎么申请",
+  "考试作弊会怎么处分",
+  "四级没过能拿学位证吗",
+];
 
 /* ---------- 导航 ---------- */
 function setView(v){
