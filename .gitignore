@@ -43,3 +43,7 @@ START.md
 
 # 瓦片缓存（重建底图时生成）
 tools/.tilecache/
+
+# 本地备份与个人启动器（不进仓库）
+_archive/
+launch.bat

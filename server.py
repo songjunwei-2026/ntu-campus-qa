@@ -172,6 +172,20 @@ def _feedback_total():
         return 0
 
 
+def _corpus_meta():
+    """语料跨度：发文部门数 + 日期年份区间。给首页「覆盖范围」用。"""
+    depts, years = set(), set()
+    for d in R.docs:
+        n = dept_name(d.get("dept") or "")
+        if n:
+            depts.add(n)
+        y = str(d.get("date") or "")[:4]
+        if len(y) == 4 and y.isdigit() and 1900 < int(y) < 2100:
+            years.add(y)
+    ys = sorted(years)
+    return len(depts), (ys[0] if ys else ""), (ys[-1] if ys else "")
+
+
 def _usage_now():
     usage = llm.LAST_USAGE or {}
     return {
@@ -1037,6 +1051,7 @@ class Handler(BaseHTTPRequestHandler):
                             if str(d.get("doc_uid", "")).startswith("web_")})
             fact_docs = len({d.get("doc_uid") for d in R.docs
                              if d.get("source") in ("fact", "official", "faq")})
+            n_depts, y_min, y_max = _corpus_meta()
             return self._send(200, {
                 "llm": bool(CFG.get("api_key")),
                 "model": CFG.get("model", ""),
@@ -1046,6 +1061,9 @@ class Handler(BaseHTTPRequestHandler):
                 "chunks": len(R.docs),
                 "chars": STATS.get("总中文字数", 0),
                 "places": len(campus_places.PLACES),
+                "depts": n_depts,
+                "year_min": y_min,
+                "year_max": y_max,
                 "web_docs": web_docs,
                 "fact_docs": fact_docs,
                 "web_cache": learn["cache"],
