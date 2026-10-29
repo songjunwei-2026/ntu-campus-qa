@@ -338,19 +338,74 @@ def _group_hits(hits, q=None):
     return groups
 
 
-def _offscope(q, groups):
-    """用户没提研究生，就别把研究生规定混进答案——本机用户默认是本科生。
+_OBJ_GRAD = re.compile(r"研究生|硕士|博士|研一|研二|研三")
+_OBJ_UNDER = re.compile(r"本科|学士|专科|大[一二三四]|应届")
+# 教职工口径：学生问"实习住宿补贴"曾引到《教职工公有住房管理办法》，
+# 对象完全不对，但标题里既没写"研究生"也没写"本科"，对象判据看不见它。
+_OBJ_STAFF = re.compile(r"教职工|教师|职工|辅导员|人才引进|职称|岗位聘任|干部")
+_STAFF_Q = re.compile(r"教职工|教师|老师|职工|辅导员|职称|人才引进|岗位聘任|工资|编制")
 
-    标题里"研究生"三个字不一定是这么写的：问"学士学位授予"曾带回
-    《博士、硕士学位授予点设置调整优化实施细则》——它写的是"硕士"，不是"研究生"，
-    只按"研究生"三个字筛等于没筛。研究层次按整套词过滤。
+
+def _scope_of(title):
+    """这篇文件是写给谁看的：grad / under / staff / any（校级通用文件两边都适用）。"""
+    t = title or ""
+    if _OBJ_STAFF.search(t):
+        return "staff"
+    g = bool(_OBJ_GRAD.search(t))
+    u = bool(_OBJ_UNDER.search(t))
+    if g and not u:
+        return "grad"
+    if u and not g:
+        return "under"
+    return "any"
+
+
+def _scope_pred(q):
+    """返回"这篇文件该不该留"的谓词。问答与关键词两条链路共用同一个，
+    否则同一句话点"关键词检索"和直接提问会看到不同的文件，出处就不可信了。"""
+    grad_q = bool(_OBJ_GRAD.search(q))
+    under_q = bool(_OBJ_UNDER.search(q))
+    if not grad_q and not under_q:
+        under_q = True          # 都没提：这个站是本科生在用的
+    want = "grad" if grad_q and not under_q else ("under" if under_q and not grad_q else "")
+    staff_ok = bool(_STAFF_Q.search(q))
+
+    def keep(title):
+        o = _scope_of(title)
+        # 教职工文件只有问教职工时才留：学生问住宿，端上来的不能是
+        # 《教职工公有住房管理办法》。
+        if o == "staff" and not staff_ok:
+            return False
+        if not want:
+            return True         # 本科和研究生都问了，比不出冲突
+        return o in ("any", "staff", want)
+    return keep
+
+
+def _offscope(q, groups):
+    """按适用对象过滤，逐条比，不做二值开关。
+
+    旧版是"问题里出现研究生/硕士/博士/考研/推免/保研就整体放行"。这条规则
+    在 C5 上翻车了：本科生问"补考没过重修咋收费 会不会影响保研"，四条引用
+    里两条是《博士研究生招生管理办法》和《直博实施办法》——"保研"是本科生
+    在问自己的出路，不是"我是研究生"，不能当放行信号。放行之后既没筛掉
+    博士文件，也没回答收费问题。
+
+    现在问题一侧判对象、文档一侧判对象，只在**明确冲突**时剔除：
+    "保研/推免/考研"不算对象信号（那是本科生的升学路径，不是读者身份），
+    问题两边都没提时按本科生处理。校级通用文件（《学生管理规定》这类）
+    两边都留，不能因为标题没写"本科"就把总则条款一起扔掉。
     """
-    if re.search(r"研究生|硕士|博士|考研|推免|保研", q):
-        return groups
-    kept = [g for g in groups
-            if not (re.search(r"研究生|硕士|博士", g["best"]["chunk"]["title"])
-                    and not re.search(r"本科|学士|专科", g["best"]["chunk"]["title"]))]
+    keep = _scope_pred(q)
+    kept = [g for g in groups if keep(g["best"]["chunk"].get("title"))]
     return kept or groups
+
+
+def _offscope_hits(q, hits):
+    """同一条对象规则作用于块列表，给 /api/keyword 用。"""
+    keep = _scope_pred(q)
+    kept = [h for h in hits if keep(h["chunk"].get("title"))]
+    return kept or hits
 
 
 def _intent_mismatch(q, groups):
@@ -772,7 +827,7 @@ def _answer_uncached(q, emit=None):
                     "notice": "如确为校内场所，可能是地图库尚未收录，建议以现场指示牌或校方公布信息为准。",
                     "expanded": [], "places": P}
 
-    hits = R.search(q, top=12)
+    hits = _drop_non_rule(q, R.search(q, top=12))
     groups = _offscope(q, _group_hits(hits, q))[:MAX_GROUPS]
     if _intent_mismatch(q, groups):
         weblearn.log_miss(q, "intent-mismatch")
@@ -1021,6 +1076,34 @@ def _gap_terms(q, ctx):
     return out
 
 
+# 没有条款的文书：获奖名单、审核结果公示、表彰通报。
+# 这类文件里没有"能不能办、要什么材料、什么条件"，命中关键词只说明
+# 这几个字在文中出现过。A1 就是被这种东西硬接的：问"必修课不及格还能
+# 申请国家奖学金吗"，端上来的是《2023 年国家奖学金推荐获奖学生名单的公示》
+# —— 它标题里"本科生""国家奖学金""申请"全有，任何按分数算的判据都不觉得它弱。
+NON_RULE = re.compile(r"公示|名单|表彰|通报")
+# 时间表性质的文书：只回答"什么时候、在哪个教室"，不回答"什么条件、多少钱"。
+# C5 问"补考没过重修咋收费"，首条却是《缓补考安排的通知》——它连"收费"
+# 两个字都没有，靠"补考"两字混进第一档。只在问制度时剔，问日程时不动。
+_SCHEDULE = re.compile(r"公示|名单|表彰|通报|安排|日程|时间表")
+# 问题想要的是制度（条件/标准/收费/影响），不是时间。两个都要判：
+# "补考什么时候考"有"补考"也有"什么时候"，是问日程，不能剔安排类文件。
+_RULE_Y = re.compile(r"条件|要求|标准|材料|流程|手续|怎么办|怎么申请|能不能|"
+                     r"可不可以|是否|收费|多少钱|影响|会不会|算不算|资格|规定|政策")
+_TIME_Y = re.compile(r"几点|什么时候|哪天|几号|时间|日期|截止|多久|开放|关门|开门")
+# 但用户要的就是名单/结果时不能剔：问"我评上了没""公示到几号"必须看公示。
+ASKING_LIST = re.compile(r"名单|公示|谁获|获奖|获评|评上|有没有我|几个名额|结果")
+
+
+def _drop_non_rule(q, hits):
+    """按问题意图剔文书：问制度别端名单和日程，问日程别端制度。"""
+    if ASKING_LIST.search(q or ""):
+        return hits
+    pat = _SCHEDULE if (_RULE_Y.search(q or "") and not _TIME_Y.search(q or "")) else NON_RULE
+    kept = [h for h in hits if not pat.search(h["chunk"].get("title") or "")]
+    return kept or hits
+
+
 def _weak(q, hits):
     """首条是不是硬凑来的。判定依据见 _keyword 里的注释。"""
     if not hits:
@@ -1033,7 +1116,7 @@ def _weak(q, hits):
 
 def _keyword(q, n_files=3, n_clauses=3):
     """关键词检索：最相关的 N 个文件 + N 个条款（条款=命中块里的原句）。"""
-    hits = R.search(q, top=48)
+    hits = _offscope_hits(q, _drop_non_rule(q, R.search(q, top=48)))
 
     # 整串检索不成，先看看是不是一次问了好几件事：拆开分头找再合并。
     # 拆开能找到东西就直接放行——整串判弱是因为几件事互相稀释，
@@ -1048,7 +1131,9 @@ def _keyword(q, n_files=3, n_clauses=3):
                 # 宁可少答一件，也不要把无关文件混进来。
                 if len(p.strip()) < 5:
                     continue
-                for h in R.search(p, top=12):
+                # 子句也要过同一套文书与对象过滤：拆句是为了救回被稀释的
+                # 问题，不是为了绕过过滤把公示、安排表重新捡回来。
+                for h in _offscope_hits(p, _drop_non_rule(p, R.search(p, top=12))):
                     k = (h["chunk"].get("doc_uid"), h["chunk"].get("chunk_id"))
                     if k not in pool or h["score"] > pool[k]["score"]:
                         pool[k] = h
@@ -1059,6 +1144,16 @@ def _keyword(q, n_files=3, n_clauses=3):
     if not hits:
         return {"ok": False, "files": [], "clauses": [], "reason": "no-hit",
                 "suggest": suggest(q, 4)["items"]}
+
+    # 语料里根本没有的专有名词：检索也没法给，跟问答链路用同一道判据。
+    # "校园网IPv6怎么开通"能命中《校园网常见网络故障》，靠的是"校园网"
+    # 三个字；但那个词在全库 0 次出现，给出来的文件一定答不了。
+    # 只判 ASCII 专名，不改分数阈值，误伤面小。
+    gaps = _gap_terms(q, "\n".join((h["chunk"].get("text") or "") for h in hits[:12]))
+    if gaps:
+        weblearn.log_miss(q, "keyword-gap")
+        return {"ok": False, "files": [], "clauses": [], "reason": "corpus-gap",
+                "gaps": gaps[:2], "suggest": suggest(q, 4)["items"]}
 
     # 弱相关兜底：宁可说没找到，也不把无关文件端上去。
     # 两个条件都要看，任一个单独都不够准：
