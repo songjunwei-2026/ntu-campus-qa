@@ -10,6 +10,14 @@ import os, json, time, urllib.request
 BASE = os.path.dirname(os.path.abspath(__file__))
 CONFIG = os.path.join(BASE, "config.json")
 
+# 直连模型接口，不走系统代理。
+# 本机为访问 GitHub 挂着代理，urllib 会默认读取 http_proxy 环境变量，
+# 结果连 api.deepseek.com 也被塞进代理隧道，代理返回 502 后整题降级成原文摘录。
+# 接口在国内可直连，绕开更稳；确实需要代理时设 LLM_USE_PROXY=1。
+_OPENER = urllib.request.build_opener(
+    urllib.request.ProxyHandler({}) if os.environ.get("LLM_USE_PROXY") != "1"
+    else urllib.request.ProxyHandler())
+
 # 模型判定"资料答不了"时输出这个标记，服务端据此返回未收录
 NO_ANSWER = "【未收录】"
 
@@ -66,10 +74,7 @@ WEB_RULES = """
 5. 开头不要写"根据网页"，直接给结论。"""
 
 
-def chat(question, context, cfg=None, timeout=45, web=False):
-    cfg = cfg or load_config()
-    if not cfg.get("api_key"):
-        raise RuntimeError("未配置 API 密钥（LLM_API_KEY 或 DEEPSEEK_API_KEY）")
+def _build_payload(question, context, cfg, web, stream=False):
     payload = {
         "model": cfg["model"],
         "messages": [
@@ -83,15 +88,28 @@ def chat(question, context, cfg=None, timeout=45, web=False):
         "thinking": {"type": "disabled"},
         "max_tokens": 600,
     }
+    if stream:
+        payload["stream"] = True
+    return payload
+
+
+def _request(cfg, payload):
+    return urllib.request.Request(
+        cfg["base_url"].rstrip("/") + "/chat/completions",
+        data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+        headers={"Content-Type": "application/json",
+                 "Authorization": "Bearer " + cfg["api_key"]},
+    )
+
+
+def chat(question, context, cfg=None, timeout=45, web=False):
+    cfg = cfg or load_config()
+    if not cfg.get("api_key"):
+        raise RuntimeError("未配置 API 密钥（LLM_API_KEY 或 DEEPSEEK_API_KEY）")
+    payload = _build_payload(question, context, cfg, web)
 
     def _post():
-        req = urllib.request.Request(
-            cfg["base_url"].rstrip("/") + "/chat/completions",
-            data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
-            headers={"Content-Type": "application/json",
-                     "Authorization": "Bearer " + cfg["api_key"]},
-        )
-        with urllib.request.urlopen(req, timeout=timeout) as r:
+        with _OPENER.open(_request(cfg, payload), timeout=timeout) as r:
             return json.loads(r.read().decode("utf-8"))
 
     # 偶发返回空正文（配额被思考吃光或被内容策略截断），重试一次再放弃
@@ -107,3 +125,65 @@ def chat(question, context, cfg=None, timeout=45, web=False):
             time.sleep(0.5)
             continue
         raise RuntimeError("模型返回空内容（finish_reason=%s）" % choice.get("finish_reason"))
+
+
+# 拒答标记的前几个字。模型要拒答时首字就是「【」，所以把开头这几个字压住不发，
+# 确认不是拒答再放出去——已经吐到屏幕上的字没法收回，只能靠"晚一点开口"规避。
+HOLD = 5
+
+
+def chat_stream(question, context, cfg=None, timeout=45, web=False, on_delta=None):
+    """边生成边回调。返回完整正文，与 chat() 语义一致，便于复用后处理。
+
+    与 chat() 的差别只有两点：payload 带 stream，以及读 SSE 逐段回调。
+    仍然保留"空正文重试一次"的语义——流式下空正文表现为一个 delta 都没有。
+    """
+    cfg = cfg or load_config()
+    if not cfg.get("api_key"):
+        raise RuntimeError("未配置 API 密钥（LLM_API_KEY 或 DEEPSEEK_API_KEY）")
+    if not on_delta:
+        return chat(question, context, cfg, timeout, web)
+
+    payload = _build_payload(question, context, cfg, web, stream=True)
+    with _OPENER.open(_request(cfg, payload), timeout=timeout) as r:
+        buf, out, released, refused = "", [], False, False
+        for raw in r:
+            line = raw.decode("utf-8", "ignore").strip()
+            if not line or not line.startswith("data:"):
+                continue
+            chunk = line[5:].strip()
+            if chunk == "[DONE]":
+                break
+            try:
+                obj = json.loads(chunk)
+            except Exception:
+                continue
+            if obj.get("usage"):
+                LAST_USAGE.clear()
+                LAST_USAGE.update(obj["usage"])
+            for ch in obj.get("choices") or []:
+                piece = (ch.get("delta") or {}).get("content") or ""
+                if not piece:
+                    continue
+                out.append(piece)
+                buf += piece
+                if refused:
+                    continue
+                if not released:
+                    if NO_ANSWER[:2] in buf or "未收录" in buf:
+                        refused = True
+                        continue
+                    if len(buf) < HOLD:
+                        continue
+                    released = True
+                    on_delta(buf)
+                else:
+                    on_delta(piece)
+    text = "".join(out).strip()
+    if not text:
+        # 一个 delta 都没拿到：跟 chat() 一样重试一次（但这次不再流式，避免二次抖动）
+        time.sleep(0.5)
+        cfg2 = dict(cfg)
+        return chat(question, context, cfg2, timeout, web)
+    return text
+

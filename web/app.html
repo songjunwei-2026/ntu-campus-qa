@@ -14,6 +14,9 @@
   --brand:#0B3B72;--hover:#EEF2F7;--active:#FFFFFF;
   --serif:"Songti SC",SimSun,serif;
   --sans:-apple-system,BlinkMacSystemFont,"Segoe UI","Microsoft YaHei","PingFang SC",sans-serif;
+  /* 阅读栏宽。720px 配 15px 正文时一行约 48 个汉字，眼睛回扫距离太长；
+     660px 配 16px 正文约 38–40 字，落在中文舒适区间内。 */
+  --col:660px;
 }
 *{box-sizing:border-box}
 [hidden]{display:none!important}
@@ -51,7 +54,7 @@ main{flex:1;min-width:0;display:flex;flex-direction:column;height:100vh}
 .view.on{display:block}
 .view-ask.on{display:flex;flex-direction:column}
 .ask-body{flex:1;min-height:0;overflow-y:auto;padding:0 24px;display:flex;flex-direction:column}
-.empty{flex:1;display:flex;flex-direction:column;justify-content:center;width:100%;max-width:720px;margin:0 auto;padding:24px 0 56px}
+.empty{flex:1;display:flex;flex-direction:column;justify-content:center;width:100%;max-width:var(--col);margin:0 auto;padding:24px 0 56px}
 .empty h1{margin:0;color:var(--navy);font:400 34px/1.3 var(--serif);letter-spacing:.02em}
 .empty h1:after{content:"";display:block;width:46px;height:4px;background:var(--red);margin-top:16px;clip-path:polygon(0 0,100% 0,87% 50%,100% 100%,0 100%)}
 .empty p{margin:12px 0 0;color:var(--ink-3);font-size:15px;line-height:1.85;max-width:680px;text-wrap:balance}
@@ -69,7 +72,7 @@ main{flex:1;min-width:0;display:flex;flex-direction:column;height:100vh}
 
 /* ---------- 输入区 ---------- */
 .composer{padding:10px 24px 16px;background:var(--bg)}
-.composer-in{display:flex;gap:10px;max-width:720px;margin:0 auto}
+.composer-in{display:flex;gap:10px;max-width:var(--col);margin:0 auto}
 .composer input{flex:1;min-width:0;height:52px;padding:0 14px;border:1px solid var(--line-2);border-radius:2px;background:#fff;color:var(--ink);font:15px/1.9 var(--sans);outline:0;transition:border-color .18s,box-shadow .18s}
 .composer input::placeholder{color:var(--ink-3)}
 .composer input:focus{border:2px solid var(--navy);box-shadow:0 0 0 3px rgba(11,59,114,.07)}
@@ -77,39 +80,52 @@ main{flex:1;min-width:0;display:flex;flex-direction:column;height:100vh}
 .send:hover{background:var(--navy-deep)}
 .send:disabled{opacity:.35;cursor:default}
 .send svg{width:19px;height:19px}
-.fineprint{max-width:720px;margin:8px auto 0;text-align:center;font-size:11px;color:var(--ink-4)}
+.fineprint{max-width:var(--col);margin:8px auto 0;text-align:center;font-size:11px;color:var(--ink-4)}
 
 /* ---------- 问答结果 ---------- */
-.thread{max-width:720px;margin:0 auto;padding:8px 0 28px}
+.thread{max-width:var(--col);margin:0 auto;padding:8px 0 28px}
 .turn{margin-bottom:26px}
 .q-line{display:flex;gap:10px;align-items:flex-start;margin-bottom:14px}
 .q-avatar{width:26px;height:26px;flex:0 0 26px;border-radius:50%;background:#F1F1F1;color:var(--ink-3);display:grid;place-items:center;font-size:11px;margin-top:1px}
-.q-text{font-size:15px;font-weight:600;line-height:1.65;padding-top:2px}
+.q-text{font-size:15.5px;font-weight:600;line-height:1.65;padding-top:2px}
 .a-block{padding-left:36px}
 .a-head{display:flex;align-items:center;gap:9px;margin-bottom:9px}
 .a-mode{display:inline-flex;align-items:center;gap:5px;padding:2px 8px;border-radius:5px;background:#EDF2F8;color:#5B7391;font-size:11px;line-height:1.7}
 .stamp{flex:0 0 auto;white-space:nowrap;padding:2px 7px 1px;border:1px solid var(--red);box-shadow:inset 0 0 0 1.5px #fff,inset 0 0 0 2.5px var(--red);color:var(--red);font:700 11px/1.3 var(--serif);letter-spacing:.12em;transform:rotate(-5deg);opacity:.9}
 .stamp.raw{border-color:var(--ink-4);box-shadow:inset 0 0 0 1.5px #fff,inset 0 0 0 2.5px var(--ink-4);color:var(--ink-3);letter-spacing:.06em}
-.a-text{font-size:15px;line-height:1.95;color:var(--ink);white-space:pre-wrap;word-break:break-word}
+.a-text{font-size:16px;line-height:1.92;color:var(--ink);white-space:pre-wrap;word-break:break-word}
 .a-text .num{color:var(--navy);font-weight:700}
-.a-text .cite{color:var(--red);font-size:11px;font-weight:700;text-decoration:none;vertical-align:super;line-height:0;margin:0 1px;padding:0 1px}
-.a-text .cite:hover{text-decoration:underline}
+/* 角标视觉上仍是 11px 小字，但热区用伪元素撑到 26×26：
+   手机上按的是手指（约 9mm），不是鼠标指针，7×13px 的链接根本点不中。 */
+.a-text .cite{position:relative;color:var(--red);font-size:11px;font-weight:700;text-decoration:none;vertical-align:super;line-height:0;margin:0 1.5px;padding:0 1.5px;border-radius:2px}
+.a-text .cite::after{content:"";position:absolute;left:50%;top:50%;width:26px;height:26px;transform:translate(-50%,-50%)}
+.a-text .cite:hover,.a-text .cite:focus-visible{background:#FBE9E7;text-decoration:none}
 .a-empty{color:var(--ink-3)}
-.refs{margin-top:16px;border-top:1px solid var(--line);padding-top:12px}
-.refs-t{font-size:11.5px;color:var(--ink-3);letter-spacing:.06em;margin-bottom:8px}
-.ref{display:flex;gap:9px;padding:8px 0;border-bottom:1px solid #F4F4F4;font-size:12.5px;line-height:1.75}
+.refs{margin-top:18px;border-top:1px solid var(--line);padding-top:12px}
+.refs-t{display:flex;align-items:baseline;gap:8px;font-size:11.5px;color:var(--ink-3);letter-spacing:.06em;margin-bottom:6px}
+.refs-t em{font-style:normal;color:var(--ink-4);letter-spacing:0;font-size:11px}
+/* 引用卡默认折成一行，点开才看到原文句。
+   四张展开的卡片能把页面拉到三屏，而多数时候用户只想确认"出处对不对"。 */
+.ref{display:block;border-bottom:1px solid #F4F4F4;font-size:12.5px;line-height:1.7}
 .ref:last-child{border-bottom:0}
-.ref:target{background:#FBFBFB}
-.ref-n{flex:0 0 18px;height:18px;border-radius:3px;background:var(--red);color:#fff;font:11px/18px var(--sans);text-align:center;margin-top:2px}
-.ref-main{min-width:0}
-.ref-title{color:var(--ink-2)}
-.ref-title a{color:inherit;text-decoration:none;border-bottom:1px solid #DADADA}
-.ref-title a:hover{border-bottom-color:var(--ink-3)}
+.ref:target,.ref[open]{background:#FBFCFD}
+.ref>summary{display:flex;align-items:baseline;gap:8px;padding:8px 2px;cursor:pointer;list-style:none}
+.ref>summary::-webkit-details-marker{display:none}
+.ref>summary:hover .ref-title{color:var(--navy)}
+.ref>summary:focus-visible{outline:2px solid var(--navy);outline-offset:-2px}
+.ref-n{flex:0 0 18px;height:18px;border-radius:3px;background:var(--red);color:#fff;font:11px/18px var(--sans);text-align:center;position:relative;top:2px}
+.ref-title{flex:1;min-width:0;color:var(--ink-2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ref[open] .ref-title{white-space:normal;overflow:visible}
+.ref-date{flex:0 0 auto;white-space:nowrap;color:var(--ink-4);font-size:11px;font-variant-numeric:tabular-nums}
+.ref-ar{flex:0 0 10px;width:10px;height:10px;color:var(--ink-4);transition:transform .16s;transform:rotate(-90deg);position:relative;top:1px}
+.ref[open] .ref-ar{transform:rotate(0)}
+.ref-body{padding:0 2px 12px 26px}
 .ref-meta{color:var(--ink-4);font-size:11.5px}
 /* 引用从"文件级"下压到"句级"：直接把命中的那句原文摆出来，不用点开整篇自己找 */
-.ref-quote{margin-top:7px;padding:7px 10px;border-left:2px solid var(--line-2);background:#FAFAFA;color:var(--ink-3);font-size:12px;line-height:1.8;
-  display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
-.skeleton{max-width:720px;margin:0 auto;padding:20px 0}
+.ref-quote{margin-top:7px;padding:8px 10px;border-left:2px solid var(--line-2);background:#FAFAFB;color:var(--ink-2);font-size:12.5px;line-height:1.8}
+.ref-link{display:inline-block;margin-top:8px;color:var(--navy);font-size:11.5px;text-decoration:none;border-bottom:1px solid #C9D6E8}
+.ref-link:hover{border-bottom-color:var(--navy)}
+.skeleton{max-width:var(--col);margin:0 auto;padding:20px 0}
 .sk{height:13px;background:#F0F0F1;border-radius:4px;margin-bottom:11px;animation:pulse 1.3s ease-in-out infinite}
 .sk:nth-child(2){width:88%}.sk:nth-child(3){width:72%}
 .sk-hint{margin-top:14px;color:var(--ink-4);font-size:12px}
@@ -226,6 +242,12 @@ mark{background:#FBEFB4;color:inherit;padding:0 1px;border-radius:2px}
   .tree{width:100%;flex:0 0 auto;max-height:40vh;border-right:0;border-bottom:1px solid var(--line)}
   .pane{padding:18px 16px 30px}
   .ask-body{padding:0 16px}
+  /* 窄屏下 .thread / .empty 的 margin:0 auto 会让 flex item 失去拉伸，
+     宽度退回 fit-content 而被内容撑到 489px（390px 屏实测），必须显式给满宽 */
+  .thread,.empty,.composer-in,.fineprint,.skeleton{max-width:none;width:100%}
+  /* 手机上 36px 的缩进会把正文挤到 20 字一行，收窄到 26px 换回可读行宽 */
+  .a-block{padding-left:26px}
+  .ref-body{padding-left:22px}
   .composer{padding:8px 16px 12px}
 }
 </style>
@@ -286,7 +308,7 @@ mark{background:#FBEFB4;color:inherit;padding:0 1px;border-radius:2px}
     </div>
     <div class="composer">
       <div class="composer-in">
-        <input id="askInput" type="text" maxlength="200" autocomplete="off" placeholder="例如：国家奖学金的申请条件是什么？">
+        <input id="askInput" type="text" maxlength="200" autocomplete="off" aria-label="输入你的问题" placeholder="例如：国家奖学金的申请条件是什么？">
         <button class="send" type="button" id="askSend" aria-label="发送">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5"/><path d="m5 12 7-7 7 7"/></svg>
         </button>
@@ -301,7 +323,7 @@ mark{background:#FBEFB4;color:inherit;padding:0 1px;border-radius:2px}
       <h2 class="pane-h">条款检索</h2>
       <p class="pane-sub">输入关键词，例如「破格评审」，列出最相关的文件与条款。</p>
       <div class="pane-search">
-        <input id="kwInput" type="text" autocomplete="off" placeholder="输入关键词，如：破格评审 / 学籍异动 / 科研经费">
+        <input id="kwInput" type="text" autocomplete="off" aria-label="输入检索关键词" placeholder="输入关键词，如：破格评审 / 学籍异动 / 科研经费">
         <button class="btn-solid" type="button" id="kwBtn">检索</button>
       </div>
       <div id="kwOut"><div class="blank">还没有检索结果</div></div>
@@ -387,49 +409,118 @@ function groupRefs(cites){
   return out.map((g,i)=>({...g,n:i+1}));
 }
 
+/* 引用列表。data-n 而不是 id：同一页可能有多轮问答，id 会撞车，
+   点角标时必须在本条回答内部找，否则永远跳到第一轮那份文件。 */
+function refsHTML(refs){
+  if(!refs.length)return "";
+  return `<div class="refs"><div class="refs-t">参考文件 <em>${refs.length} 份 · 点开看原文句</em></div>${refs.map(g=>`
+    <details class="ref" data-n="${g.n}">
+      <summary><span class="ref-n">${g.n}</span><span class="ref-title">${esc(g.title)}</span>${g.date?`<span class="ref-date">${esc(g.date)}</span>`:""}<svg class="ref-ar" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><path d="m6 9 6 6 6-6"/></svg></summary>
+      <div class="ref-body">
+        <div class="ref-meta">${[g.dept].filter(Boolean).map(esc).join(" · ")||"出处未标注"}${g.chunk==null?"":` · 第 ${g.chunk+1} 段${g.sent?` 第 ${g.sent} 句`:""}`}</div>
+        ${g.snippet?`<div class="ref-quote">${esc(g.snippet)}</div>`:""}
+        ${g.url?`<a class="ref-link" href="${esc(g.url)}" target="_blank" rel="noopener">查看原文 ↗</a>`:""}
+      </div>
+    </details>`).join("")}</div>`;
+}
+
+/* partial=true：流式过程中用。没有核验章、没有 notice，正文由 delta 边收边填。 */
+function answerHTML(q,d,refs,partial){
+  const noMap={};refs.forEach(g=>g.nos.forEach(n=>noMap[n]=g.n));
+  const mode={llm:"模型归纳 · 依据原文",web:"联网检索 · 源自官网",place:"校园地点 · 位置信息",gap:"语料未覆盖"}[d.mode]||"原文摘录";
+  const stamp=partial?'<span class="stamp raw" style="opacity:.6">生成中</span>'
+    :(d.ok&&!d.degraded?'<span class="stamp">已核验</span>':"")+(d.degraded?'<span class="stamp raw">原文摘录</span>':"");
+  const body=d.answer?highlight(d.answer,noMap):(partial?"":"现有文件中未涉及这个问题。");
+  return `<div class="q-line"><div class="q-avatar">你</div><div class="q-text">${esc(q)}</div></div>
+    <div class="a-block">
+      <div class="a-head"><span class="a-mode">${esc(mode)}</span>${stamp}</div>
+      ${d.year_note?`<div class="warn" style="margin:0 0 12px">${esc(d.year_note)}</div>`:""}
+      <div class="a-text${d.ok||partial?"":" a-empty"}">${body}</div>
+      ${refsHTML(refs)}
+      ${!partial&&d.notice?`<div class="ref-meta" style="margin-top:10px">${esc(d.notice)}</div>`:""}
+    </div>`;
+}
+
+/* 只在用户本来就在底部时才跟着滚，否则会把正在读上文的人拽下去 */
+function stick(){
+  const b=$("#askBody");
+  if(b.scrollHeight-b.scrollTop-b.clientHeight<160)b.scrollTop=b.scrollHeight;
+}
+
 async function ask(){
   const q=$("#askInput").value.trim();if(!q)return;
   const btn=$("#askSend");btn.disabled=true;
   $("#askEmpty").hidden=true;
   const th=$("#thread");th.hidden=false;
-  th.insertAdjacentHTML("beforeend",`<div class="turn" id="pending"><div class="q-line"><div class="q-avatar">你</div><div class="q-text">${esc(q)}</div></div><div class="a-block"><div class="skeleton"><div class="sk"></div><div class="sk"></div><div class="sk"></div></div><div class="sk-hint" id="skHint">正在检索原文…</div></div></div>`);
+  th.insertAdjacentHTML("beforeend",`<div class="turn"><div class="q-line"><div class="q-avatar">你</div><div class="q-text">${esc(q)}</div></div><div class="a-block"><div class="skeleton"><div class="sk"></div><div class="sk"></div><div class="sk"></div></div><div class="sk-hint">正在检索原文…</div></div></div>`);
+  const el=th.lastElementChild;
   th.scrollIntoView({block:"end",behavior:"smooth"});
   let tick=0;
   const timer=setInterval(()=>{
     tick++;
-    const h=document.querySelector("#skHint");
+    const h=el.querySelector(".sk-hint");
     if(h)h.textContent=`正在检索原文并核对（已用 ${tick}s）…`;
   },1000);
   try{
-    const r=await fetch("/api/ask",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({q})});
-    if(!r.ok)throw new Error();
-    const d=await r.json();
-    const refs=groupRefs(d.citations);
-    const noMap={};refs.forEach(g=>g.nos.forEach(n=>noMap[n]=g.n));
-    const mode={llm:"模型归纳 · 依据原文",web:"联网检索 · 源自官网",place:"校园地点 · 位置信息",gap:"语料未覆盖"}[d.mode]||"原文摘录";
-    const body=d.answer?highlight(d.answer,noMap):"现有文件中未涉及这个问题。";
-    $("#pending").outerHTML=`<div class="turn">
-      <div class="q-line"><div class="q-avatar">你</div><div class="q-text">${esc(q)}</div></div>
-      <div class="a-block">
-        <div class="a-head"><span class="a-mode">${esc(mode)}</span>${d.ok&&!d.degraded?'<span class="stamp">已核验</span>':''}${d.degraded?'<span class="stamp raw">原文摘录</span>':''}</div>
-        ${d.year_note?`<div class="warn" style="margin:0 0 12px">${esc(d.year_note)}</div>`:""}
-        <div class="a-text${d.ok?"":" a-empty"}">${body}</div>
-        ${refs.length?`<div class="refs"><div class="refs-t">参考文件</div>${refs.map(g=>`
-          <div class="ref" id="ref-${g.n}"><div class="ref-n">${g.n}</div><div class="ref-main">
-            <div class="ref-title">${g.url?`<a href="${esc(g.url)}" target="_blank" rel="noopener">${esc(g.title)}</a>`:esc(g.title)}</div>
-            <div class="ref-meta">${[g.dept,g.date].filter(Boolean).map(esc).join(" · ")||"出处未标注"}${g.chunk==null?"":` · 第 ${g.chunk+1} 段${g.sent?` 第 ${g.sent} 句`:""}`}</div>
-            ${g.snippet?`<div class="ref-quote">${esc(g.snippet)}</div>`:""}
-          </div></div>`).join("")}</div>`:""}
-        ${d.notice?`<div class="ref-meta" style="margin-top:10px">${esc(d.notice)}</div>`:""}
-      </div></div>`;
+    if(!await streamAsk(q,el))throw new Error("no-final");
   }catch(e){
-    $("#pending").outerHTML=`<div class="turn"><div class="q-line"><div class="q-avatar">你</div><div class="q-text">${esc(q)}</div></div><div class="a-block"><div class="a-text a-empty">服务暂不可用，请稍后重试。</div></div></div>`;
+    // 流断了（代理缓冲、连接被掐、浏览器不支持 ReadableStream）就退回一次性接口，
+    // 慢一点但一定有结果，不能让用户白等。
+    try{
+      const r=await fetch("/api/ask",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({q})});
+      if(!r.ok)throw new Error();
+      const d=await r.json();
+      el.innerHTML=answerHTML(q,d,groupRefs(d.citations),false);
+    }catch(e2){
+      el.innerHTML=`<div class="q-line"><div class="q-avatar">你</div><div class="q-text">${esc(q)}</div></div><div class="a-block"><div class="a-text a-empty">服务暂不可用，请稍后重试。</div></div>`;
+    }
   }finally{
     clearInterval(timer);
     btn.disabled=false;$("#askInput").value="";
     $("#askBody").scrollTop=$("#askBody").scrollHeight;
-    th.lastElementChild.scrollIntoView({block:"nearest",behavior:"smooth"});
   }
+}
+
+/* SSE 解析：服务端一个事件一行 data: {...}，空行分隔。
+   收到 meta 就先把引用摆出来，收到 delta 就往正文里贴字，
+   收到 final 再用权威结果整体替换（拒答、数值核对不通过时会在这里被纠正）。 */
+async function streamAsk(q,el){
+  const r=await fetch("/api/ask/stream",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({q})});
+  if(!r.ok||!r.body)return false;
+  const rd=r.body.getReader(),dec=new TextDecoder();
+  let acc="",buf="",refs=[],noMap={},started=false,last=null;
+  while(true){
+    const s=await rd.read();
+    if(s.done)break;
+    acc+=dec.decode(s.value,{stream:true});
+    let i;
+    while((i=acc.indexOf("\n\n"))>=0){
+      const frame=acc.slice(0,i);acc=acc.slice(i+2);
+      const ln=frame.split("\n").find(x=>x.indexOf("data: ")==0);
+      if(!ln)continue;
+      let ev;try{ev=JSON.parse(ln.slice(6))}catch(_){continue}
+      if(ev.type==="meta"){
+        refs=groupRefs(ev.citations);
+        refs.forEach(g=>g.nos.forEach(n=>noMap[n]=g.n));
+        el.innerHTML=answerHTML(q,ev,refs,true);
+        started=true;stick();
+      }else if(ev.type==="delta"){
+        if(!started){el.innerHTML=answerHTML(q,{citations:[]},[],true);started=true;}
+        buf+=ev.t;
+        const t=el.querySelector(".a-text");
+        if(t)t.innerHTML=highlight(buf,noMap);
+        stick();
+      }else if(ev.type==="final"){
+        last=ev;
+      }else if(ev.type==="error"){
+        throw new Error(ev.msg||"stream-error");
+      }
+    }
+  }
+  if(!last)return false;
+  el.innerHTML=answerHTML(q,last,groupRefs(last.citations),false);
+  el.scrollIntoView({block:"nearest",behavior:"smooth"});
+  return true;
 }
 
 function highlight(text,noMap){
@@ -438,6 +529,17 @@ function highlight(text,noMap){
   html=html.replace(/\d+(?:\.\d+)?\s*(?:%|％|个工作日|工作日|天|日|小时|个月|年|次|元|学时|学分|人)/g,m=>`<span class="num">${m}</span>`);
   return html;
 }
+/* 点角标：除了跳过去，还要把那张卡展开——否则跳过去只看到一行标题，等于没找到。
+   必须在本条回答内部找：同一个 n 在多轮问答里都出现，用全局 id 会跳到第一轮。 */
+document.getElementById("thread").addEventListener("click",e=>{
+  const a=e.target.closest("a.cite");if(!a)return;
+  const n=(a.getAttribute("href")||"").replace("#ref-","");
+  const scope=a.closest(".turn")||document;
+  const el=scope.querySelector(`details.ref[data-n="${n}"]`);
+  if(!el)return;
+  el.open=true;
+  el.scrollIntoView({block:"center",behavior:"smooth"});
+});
 
 /* ---------- 条款检索 ---------- */
 $("#kwBtn").addEventListener("click",kw);

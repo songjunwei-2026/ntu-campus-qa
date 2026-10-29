@@ -705,7 +705,7 @@ def _web_answer(q, places_block, expanded=None, depth=0):
     }
 
 
-def _answer_uncached(q):
+def _answer_uncached(q, emit=None):
     P = _place_block(q)
     # 明确在问"某地怎么走/在哪"时，位置本身就是答案，不必先看政策语料
     if P["matched"] and P.get("reason", "").startswith(("locative", "delivery", "room")):
@@ -802,6 +802,14 @@ def _answer_uncached(q):
         "places": P,
     }
 
+    # 流式：引用和模式先推给前端。用户能立刻看到"在查哪几份文件"，
+    # 而不是盯着骨架屏猜系统是不是卡住了。
+    if emit:
+        # 只带前端渲染要用的字段：evidence 是整段原文（每条 1–2KB），
+        # 连同 4 条一起推会把首屏引用列表推迟几百毫秒，得不偿失。
+        emit({"type": "meta", "mode": "retrieval", "citations": _slim_cites(citations),
+              "year_note": res["year_note"], "expanded": res["expanded"]})
+
     if not CFG.get("api_key"):
         res["notice"] = "当前为原文摘录模式：未接入大模型，系统无法判断这段原文是否真的回答了问题。"
         return res
@@ -818,7 +826,11 @@ def _answer_uncached(q):
                 "expanded": res["expanded"], "places": P, "year_note": _year_note(q, hits)}
 
     try:
-        text = llm.chat(q, ctx, CFG)
+        if emit:
+            text = llm.chat_stream(q, ctx, CFG,
+                                   on_delta=lambda t: emit({"type": "delta", "t": t}))
+        else:
+            text = llm.chat(q, ctx, CFG)
     except Exception as e:
         # 降级成原文摘录时不能算"已核验"：摘录只是把命中的原文摆出来，
         # 它到底有没有回答问题没人核对过。前端据此不盖核验章。
@@ -1126,7 +1138,7 @@ def _tree_data():
     return {"years": years, "total": len(docs)}
 
 
-def answer(q):
+def answer(q, emit=None):
     """带进程内 LRU 缓存的问答入口；拒答和异常结果不缓存。"""
     global _CACHE_HITS, _TOTAL_IN, _TOTAL_CACHED, _TOTAL_OUT, _USAGE_CALLS
     _cache_prepare()
@@ -1140,7 +1152,7 @@ def answer(q):
         result["cached"] = True
         return result
     llm.LAST_USAGE.clear()
-    result = _answer_uncached(q)
+    result = _answer_uncached(q, emit)
     usage = _usage_now()
     if usage["in"] or usage["cached"] or usage["out"]:
         _TOTAL_IN += usage["in"]
@@ -1291,6 +1303,35 @@ class Handler(BaseHTTPRequestHandler):
             return
         self._send(404, {"error": "not found"})
 
+    def _stream_ask(self, q):
+        """SSE 流式问答。
+
+        没有 Content-Length，靠关闭连接结束响应——前端必须用 fetch 的
+        ReadableStream 边读边渲染，不能 await r.json()，那样等于没流式。
+        """
+        self.send_response(200)
+        self.send_header("Content-Type", "text/event-stream; charset=utf-8")
+        self.send_header("Cache-Control", "no-cache, no-transform")
+        self.send_header("Connection", "close")
+        self.end_headers()
+        self.close_connection = True
+
+        def w(ev):
+            try:
+                self.wfile.write(("data: %s\n\n" % json.dumps(ev, ensure_ascii=False)).encode("utf-8"))
+                self.wfile.flush()
+            except (BrokenPipeError, ConnectionResetError, OSError):
+                pass
+
+        try:
+            res = answer(q, emit=w)
+            ev = dict(res) if isinstance(res, dict) else {"ok": False}
+            ev["citations"] = _slim_cites(ev.get("citations"))
+            ev["type"] = "final"
+            w(ev)
+        except Exception as e:
+            w({"type": "error", "msg": "检索失败：%s" % e})
+
     def do_POST(self):
         path = urlparse(self.path).path
         if path == "/api/feedback":
@@ -1315,6 +1356,21 @@ class Handler(BaseHTTPRequestHandler):
             with open(FEEDBACK_PATH, "a", encoding="utf-8") as f:
                 f.write(json.dumps(row, ensure_ascii=False) + "\n")
             return self._send(200, {"ok": True, "feedback_total": _feedback_total()})
+        if path == "/api/ask/stream":
+            n = int(self.headers.get("Content-Length") or 0)
+            try:
+                body = json.loads(self.rfile.read(n).decode("utf-8"))
+            except Exception:
+                return self._send(400, {"error": "请求体不是合法 JSON"})
+            q_value = body.get("q") if isinstance(body, dict) else None
+            if not isinstance(q_value, str):
+                return self._send(400, {"error": "问题必须是字符串"})
+            q = q_value.strip()
+            if not q:
+                return self._send(400, {"error": "问题为空"})
+            if len(q) > 200:
+                return self._send(400, {"error": "问题过长，请精简到 200 字以内"})
+            return self._stream_ask(q)
         if path != "/api/ask":
             return self._send(404, {"error": "not found"})
         n = int(self.headers.get("Content-Length") or 0)
@@ -1336,6 +1392,13 @@ class Handler(BaseHTTPRequestHandler):
             self._send(200, answer(q))
         except Exception as e:
             self._send(500, {"error": "检索失败：%s" % e})
+
+
+def _slim_cites(cites):
+    """流式推给前端的引用：去掉 evidence 这类只给模型看的大字段。"""
+    keep = ("no", "title", "source", "dept", "date", "url", "page", "relevance",
+            "snippet", "doc_uid", "chunk_id", "sent_no")
+    return [{k: c.get(k) for k in keep} for c in (cites or [])]
 
 
 def _lan_ips():
