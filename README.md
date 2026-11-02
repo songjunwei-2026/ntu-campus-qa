@@ -6,6 +6,15 @@
 
 > 想把这个项目发布到 GitHub、或者隔一段时间回来复习，看 [`docs/发布与复习.md`](docs/发布与复习.md)。
 
+**文档索引**
+
+| 文档 | 讲什么 |
+|---|---|
+| [`docs/RULES.md`](docs/RULES.md) | 规则说明书：为什么这么答、凭什么拒答，每条规则标了代码落点 |
+| [`docs/VERSIONS.md`](docs/VERSIONS.md) | 版本对照：`v0-init` / `v1-audit` / 当前，以及怎么取出旧版 |
+| [`docs/BASELINE.md`](docs/BASELINE.md) | 当前实测基线，并标明哪份审计报告已过期 |
+| [`使用说明.md`](使用说明.md) | 给使用者看：怎么打开、怎么问、出问题怎么办 |
+
 ---
 
 ## 为什么做这个
