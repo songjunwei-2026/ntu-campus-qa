@@ -125,6 +125,18 @@ main{flex:1;min-width:0;display:flex;flex-direction:column;height:100vh}
 .ref-quote{margin-top:7px;padding:8px 10px;border-left:2px solid var(--line-2);background:#FAFAFB;color:var(--ink-2);font-size:12.5px;line-height:1.8}
 .ref-link{display:inline-block;margin-top:8px;color:var(--navy);font-size:11.5px;text-decoration:none;border-bottom:1px solid #C9D6E8}
 .ref-link:hover{border-bottom-color:var(--navy)}
+/* ---------- 相关问法 ----------
+   回答之后推的几条，点了直接提问。做成按钮而不是链接：
+   这是要发起一次新提问，不是跳转。 */
+.related{margin-top:20px;padding-top:14px;border-top:1px solid var(--line)}
+.rel-list{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px}
+.rel-item{display:inline-flex;align-items:center;gap:8px;max-width:100%;padding:7px 12px;border:1px solid var(--line-2);border-radius:2px;background:#fff;color:var(--ink-2);font:13.5px/1.5 var(--sans);text-align:left;cursor:pointer;transition:border-color .16s,color .16s,background-color .16s}
+.rel-item:hover{border-color:var(--navy);color:var(--navy);background:#F7FAFD}
+.rel-item:focus-visible{outline:2px solid var(--navy);outline-offset:2px}
+.rel-item span{min-width:0;overflow-wrap:anywhere}
+.rel-item svg{width:13px;height:13px;flex:0 0 13px;color:var(--ink-4)}
+.rel-item:hover svg{color:var(--navy)}
+
 .skeleton{max-width:var(--col);margin:0 auto;padding:20px 0}
 .sk{height:13px;background:#F0F0F1;border-radius:4px;margin-bottom:11px;animation:pulse 1.3s ease-in-out infinite}
 .sk:nth-child(2){width:88%}.sk:nth-child(3){width:72%}
@@ -445,6 +457,17 @@ function refsHTML(refs){
     </details>`).join("")}</div>`;
 }
 
+/* 相关问法。服务端已经逐条验证过"点开答得上"，前端不再筛。
+   hint 只放进 title 里：学生扫的是一句话本身，不是出处；
+   但想确认这题靠不靠谱时，鼠标停一下能看到答案出自哪份文件。 */
+function relatedHTML(list){
+  if(!list||!list.length)return "";
+  return `<div class="related"><div class="refs-t">你可能还想问 <em>点一下直接提问</em></div><div class="rel-list">${
+    list.map(r=>`<button class="rel-item" type="button" data-q="${esc(r.q)}"${
+      r.hint?` title="答案出自《${esc(r.hint)}》"`:""}><span>${esc(r.q)}</span>${ARROW}</button>`).join("")
+  }</div></div>`;
+}
+
 /* partial=true：流式过程中用。没有核验章、没有 notice，正文由 delta 边收边填。 */
 function answerHTML(q,d,refs,partial){
   const noMap={};refs.forEach(g=>g.nos.forEach(n=>noMap[n]=g.n));
@@ -458,6 +481,7 @@ function answerHTML(q,d,refs,partial){
       ${d.year_note?`<div class="warn" style="margin:0 0 12px">${esc(d.year_note)}</div>`:""}
       <div class="a-text${d.ok||partial?"":" a-empty"}">${body}</div>
       ${refsHTML(refs)}
+      ${partial?"":relatedHTML(d.related)}
       ${!partial&&d.notice?`<div class="ref-meta" style="margin-top:10px">${esc(d.notice)}</div>`:""}
     </div>`;
 }
@@ -560,6 +584,15 @@ document.getElementById("thread").addEventListener("click",e=>{
   if(!el)return;
   el.open=true;
   el.scrollIntoView({block:"center",behavior:"smooth"});
+});
+
+/* 相关问法：填进输入框再走同一条 ask()，保证与手打的提问完全一样——
+   另开一条接口的话，引用、缓存、核验章都得再实现一遍，迟早分叉。 */
+document.getElementById("thread").addEventListener("click",e=>{
+  const b=e.target.closest(".rel-item");if(!b)return;
+  const q=b.getAttribute("data-q");if(!q)return;
+  $("#askInput").value=q;
+  ask();
 });
 
 /* ---------- 条款检索 ---------- */

@@ -28,6 +28,7 @@ from rag import Retriever, dept_name, SYNONYMS
 import llm
 import places as campus_places
 import websearch, weblearn
+import related as related_q
 from intent_rules import RULES
 
 WEB_CHUNKS = os.path.join(BASE, "corpus", "web_chunks.jsonl")
@@ -1306,6 +1307,31 @@ def _replay_stream(res, emit):
         emit({"type": "delta", "t": piece})
 
 
+def _related_pipeline(s):
+    """相关问题验证用的检索：与正常提问同一条链路（文书 + 对象过滤）。
+    推荐出去的题必须点得开、答得上，所以判断标准和回答本身一致。"""
+    return _offscope_hits(s, _drop_non_rule(s, R.search(s, top=12)))[:3]
+
+
+def _related(q, res):
+    """答完之后推几条学生可能接着问的题。
+
+    种子取引用到的文件；拒答时（引用为空）退回检索前几条——
+    "文件在这、但答不了这个问题"的情况，同文件里总有别的问法答得上。
+    整个过程几十毫秒、不调模型，失败一律返回空表：推荐挂了不能影响回答。
+    """
+    try:
+        uids = [c.get("doc_uid") for c in (res.get("citations") or []) if c.get("doc_uid")]
+        if not uids:
+            uids = [h["chunk"]["doc_uid"] for h in _related_pipeline(q)
+                    if h.get("coverage", 0) >= 0.55]
+        if not uids:
+            return []
+        return related_q.suggest(q, uids, R, pipeline=_related_pipeline)
+    except Exception:
+        return []
+
+
 def answer(q, emit=None):
     """带进程内 LRU 缓存的问答入口；拒答和异常结果不缓存。"""
     global _CACHE_HITS, _TOTAL_IN, _TOTAL_CACHED, _TOTAL_OUT, _USAGE_CALLS
@@ -1331,6 +1357,7 @@ def answer(q, emit=None):
         _USAGE_CALLS += 1
     result["usage"] = usage
     result["cached"] = False
+    result["related"] = _related(q, result)
     if result.get("ok"):
         saved = _copy_result(result)
         saved.pop("usage", None)

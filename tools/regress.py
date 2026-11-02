@@ -130,7 +130,62 @@ def check_ask(q, want):
     return hit, ("引用%s %.28s" % ("对 " if hit else "错 ", titles[0]))
 
 
+# -------- 相关问法 --------
+# 新增功能（2026-11-02）：答完之后推几条"你可能还想问"。
+# 验收口径不看数量好不好看，看三条：
+#   1. 推出来的题不许和刚问的重复，也不许自己重复；
+#   2. 每一条都要带出处，点开能落到某份文件上；
+#   3. 抽查一组：把推出来的题真的再问一遍，必须答得上来——
+#      "点了问不出东西"是这类功能最容易出的毛病，光看接口返回看不出来。
+RELATED_CASES = [
+    ("R1", "国家奖学金怎么申请"),
+    ("R2", "转专业需要什么条件"),
+    ("R3", "请假要办什么手续"),
+    ("R4", "考试作弊会怎么处分"),
+    ("R5", "宿舍能换吗"),
+]
+
+
+def check_related(q, deep=False):
+    d = _post("/api/ask", {"q": q})
+    if not d.get("ok"):
+        return False, "主链路本身没答上来，先别测推荐"
+    rel = d.get("related") or []
+    rel = [r for r in rel if isinstance(r, dict) and (r.get("q") or "").strip()]
+    if len(rel) < 3:
+        return False, "只推了 %d 条" % len(rel)
+    qs = [r["q"].strip() for r in rel]
+    if len(set(qs)) != len(qs):
+        return False, "推了重复的题"
+    if q.strip() in qs:
+        return False, "把刚问过的问题又推了一遍"
+    nope = [r["q"] for r in rel if not r.get("hint")]
+    if nope:
+        return False, "没标出处：%s" % nope[0][:16]
+    if deep:
+        for item in rel:
+            r2 = _post("/api/ask", {"q": item["q"]})
+            if not r2.get("ok") or not r2.get("citations"):
+                return False, "推的题点开答不上：%s" % item["q"][:20]
+    return True, " ｜ ".join(qs)[:52]
+
+
 def main():
+    if "--related" in sys.argv:
+        deep = "--deep" in sys.argv
+        rows = []
+        for cid, q in RELATED_CASES:
+            try:
+                ok, note = check_related(q, deep)
+            except Exception as e:
+                ok, note = False, "请求失败 %s" % e
+            rows.append((cid, ok, q, note))
+        for cid, ok, q, note in rows:
+            print("%s %s %-22s %s" % (cid, "PASS" if ok else "FAIL", q[:22], note))
+        k = sum(1 for r in rows if r[1])
+        print("\n相关问法：%d/%d" % (k, len(rows)))
+        return 0 if k == len(rows) else 1
+
     use_ask = "--ask" in sys.argv
     fn = check_ask if use_ask else check_keyword
     idx = 3 if use_ask else 2
