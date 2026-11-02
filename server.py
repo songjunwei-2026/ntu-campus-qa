@@ -14,7 +14,7 @@
   GET  /api/place?q= 按地名/房间号查地点
   POST /api/ask      {"q": "问题"}  ->  回答 + 出处 + 涉及地点
 """
-import os, sys, json, re, socket
+import os, sys, json, re, socket, time
 from collections import OrderedDict
 from datetime import date
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
@@ -125,7 +125,9 @@ def _norm_q(q):
 
 
 def _cache_state_now():
-    paths = (os.path.join(BASE, "corpus", "chunks.jsonl"), FACT_CHUNKS)
+    # 三份语料都要看：原先漏了 web_chunks，官网那批更新后缓存不会失效，
+    # 用户改完文件问同一个问题，拿到的还是旧答案。
+    paths = (os.path.join(BASE, "corpus", "chunks.jsonl"), WEB_CHUNKS, FACT_CHUNKS)
     mtimes = []
     for path in paths:
         try:
@@ -133,6 +135,17 @@ def _cache_state_now():
         except OSError:
             mtimes.append(None)
     return (date.today().isoformat(), tuple(mtimes))
+
+
+def _corpus_mtime():
+    """语料文件最后一次被改动的时间（epoch 秒），0 表示一份都没有。"""
+    ts = []
+    for path in (os.path.join(BASE, "corpus", "chunks.jsonl"), WEB_CHUNKS, FACT_CHUNKS):
+        try:
+            ts.append(os.path.getmtime(path))
+        except OSError:
+            pass
+    return int(max(ts)) if ts else 0
 
 
 def _cache_prepare():
@@ -1466,6 +1479,7 @@ class Handler(BaseHTTPRequestHandler):
                 "chars": STATS.get("总中文字数", 0),
                 "places": len(campus_places.PLACES),
                 "depts": n_depts,
+                "corpus_mtime": _corpus_mtime(),
                 "year_min": y_min,
                 "year_max": y_max,
                 "web_docs": web_docs,
@@ -1531,6 +1545,31 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         path = urlparse(self.path).path
+        if path == "/api/rebuild":
+            # 真的重新读盘：加了哪些文件、删了哪些，都以磁盘为准。
+            # 这个按钮原来只有四段 CSS 动画，从头到尾没发过一个请求，
+            # 走完 2.5 秒就印一句"已是最新"——那句话是写死的。
+            global R
+            t0 = time.time()
+            old_uids = {d.get("doc_uid") for d in R.docs}
+            old_chunks = len(R.docs)
+            try:
+                R = Retriever([os.path.join(BASE, "corpus", "chunks.jsonl"),
+                               WEB_CHUNKS, FACT_CHUNKS])
+            except Exception as e:
+                return self._send(500, {"ok": False, "error": str(e)})
+            # 语料换了，旧答案不能再命中，否则问同一个问题还是老结论
+            _ANSWER_CACHE.clear()
+            new_uids = {d.get("doc_uid") for d in R.docs}
+            return self._send(200, {
+                "ok": True,
+                "docs": len(new_uids),
+                "chunks": len(R.docs),
+                "added_docs": len(new_uids - old_uids),
+                "removed_docs": len(old_uids - new_uids),
+                "added_chunks": len(R.docs) - old_chunks,
+                "ms": int((time.time() - t0) * 1000),
+            })
         if path == "/api/feedback":
             n = int(self.headers.get("Content-Length") or 0)
             try:

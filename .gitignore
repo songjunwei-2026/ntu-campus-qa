@@ -47,3 +47,6 @@ tools/.tilecache/
 # 本地备份与个人启动器（不进仓库）
 _archive/
 launch.bat
+
+# 临时调试产物
+_temp/

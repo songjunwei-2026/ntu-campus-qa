@@ -72,6 +72,11 @@ main{flex:1;min-width:0;display:flex;flex-direction:column;height:100vh}
 
 /* ---------- 输入区 ---------- */
 .composer{padding:10px 24px 16px;background:var(--bg)}
+.composer-tools{display:flex;justify-content:flex-end;max-width:var(--col);margin:0 auto 8px}
+.tool-btn{display:inline-flex;align-items:center;gap:6px;height:30px;padding:0 12px;border:1px solid var(--line-2);border-radius:4px;background:#fff;color:var(--ink-2);font:12.5px/1 var(--sans);cursor:pointer;transition:border-color .18s,color .18s}
+.tool-btn:hover{border-color:var(--ink-3);color:var(--ink)}
+.tool-btn svg{width:14px;height:14px;flex:0 0 14px}
+.tool-btn:focus-visible{outline:2px solid var(--navy);outline-offset:2px}
 .composer-in{display:flex;gap:10px;max-width:var(--col);margin:0 auto}
 .composer input{flex:1;min-width:0;height:52px;padding:0 14px;border:1px solid var(--line-2);border-radius:2px;background:#fff;color:var(--ink);font:15px/1.9 var(--sans);outline:0;transition:border-color .18s,box-shadow .18s}
 .composer input::placeholder{color:var(--ink-3)}
@@ -228,6 +233,8 @@ mark{background:#FBEFB4;color:inherit;padding:0 1px;border-radius:2px}
 .steps{font-size:12.5px;color:var(--ink-2);line-height:2.05;min-height:76px}
 .steps div{display:flex;align-items:center;gap:7px;opacity:.35}
 .steps div.done,.steps div.now{opacity:1}
+.steps div.bad{opacity:1;color:var(--red)}
+.steps div.bad i{background:var(--red)}
 .steps i{width:5px;height:5px;border-radius:50%;background:var(--ink-3);font-style:normal}
 .steps div.now i{background:var(--brand)}
 .bar{height:3px;border-radius:2px;background:#F0F0F1;overflow:hidden;margin:10px 0 14px}
@@ -323,6 +330,12 @@ mark{background:#FBEFB4;color:inherit;padding:0 1px;border-radius:2px}
       <div class="thread" id="thread" hidden></div>
     </div>
     <div class="composer">
+      <div class="composer-tools" id="composerTools" hidden>
+        <button class="tool-btn" type="button" id="clearBtn" title="清空当前对话，回到首页">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/></svg>
+          新对话
+        </button>
+      </div>
       <div class="composer-in">
         <input id="askInput" type="text" maxlength="200" autocomplete="off" aria-label="输入你的问题" placeholder="例如：国家奖学金的申请条件是什么？">
         <button class="send" type="button" id="askSend" aria-label="发送">
@@ -366,7 +379,7 @@ mark{background:#FBEFB4;color:inherit;padding:0 1px;border-radius:2px}
 <div class="mask" id="mask">
   <div class="modal" role="dialog" aria-modal="true" aria-labelledby="mTitle">
     <h3 id="mTitle">更新文件库</h3>
-    <p>扫描校内文件目录，重新切块并建立索引。</p>
+    <p>重新读取 corpus 下的三份语料，重建检索索引。加了或删了文件，数字会变。</p>
     <div class="steps" id="mSteps"></div>
     <div class="bar"><span id="mBar"></span></div>
     <div class="modal-foot"><button class="btn-ghost" type="button" id="mClose">关闭</button></div>
@@ -406,12 +419,28 @@ document.querySelector(".nav").addEventListener("click",e=>{
   const b=e.target.closest(".nav-item");if(b)setView(b.dataset.view);
 });
 
+/* ---------- 清空对话，回到首页 ---------- */
+function clearThread(){
+  const th=$("#thread");
+  th.innerHTML="";th.hidden=true;
+  $("#askEmpty").hidden=false;
+  $("#composerTools").hidden=true;
+  $("#askInput").value="";
+  $("#askBody").scrollTop=0;
+  loadStatus();          // 统计顺手刷一遍，别让首页还挂着上一轮的
+  $("#askInput").focus();
+}
+$("#clearBtn").addEventListener("click",clearThread);
+
 /* ---------- 语料统计 ---------- */
 const STAT={docs:0,chunks:0};
 function paintMeta(s){
   if(!s||!Number.isFinite(Number(s.docs))){$("#sideMeta").textContent="语料不可用";return}
   STAT.docs=Number(s.docs);STAT.chunks=Number(s.chunks);
-  $("#sideMeta").innerHTML=`数据更新于 ${new Date().toLocaleDateString("zh-CN",{month:"2-digit",day:"2-digit"})} ${new Date().toLocaleTimeString("zh-CN",{hour:"2-digit",minute:"2-digit"})}`;
+  // 这里原先写的是 new Date()，显示的是打开页面的时间，不是语料的时间
+  const t=s.corpus_mtime?new Date(s.corpus_mtime*1000):null;
+  const mt=t?`${t.getMonth()+1}月${t.getDate()}日 ${String(t.getHours()).padStart(2,"0")}:${String(t.getMinutes()).padStart(2,"0")}`:"";
+  $("#sideMeta").innerHTML=mt?`语料更新于 ${mt}`:"语料时间未知";
   const dp=s.depts?` · <b>${s.depts}</b> 个发文部门`:"";
   const yr=(s.year_min&&s.year_max)?` · ${s.year_min}–${s.year_max}`:"";
   const hm=$("#heroMeta");
@@ -496,6 +525,7 @@ async function ask(){
   const q=$("#askInput").value.trim();if(!q)return;
   const btn=$("#askSend");btn.disabled=true;
   $("#askEmpty").hidden=true;
+  $("#composerTools").hidden=false;
   const th=$("#thread");th.hidden=false;
   th.insertAdjacentHTML("beforeend",`<div class="turn"><div class="q-line"><div class="q-avatar">你</div><div class="q-text">${esc(q)}</div></div><div class="a-block"><div class="skeleton"><div class="sk"></div><div class="sk"></div><div class="sk"></div></div><div class="sk-hint">正在检索原文…</div></div></div>`);
   const el=th.lastElementChild;
@@ -773,32 +803,46 @@ function paintDocDetail(d,i,j){
   });
 }
 
-/* ---------- 更新文件库 ---------- */
-const STEPS=["扫描校内文件目录","解析文档结构","按条款切块","建立检索索引"];
-$("#updateBtn").addEventListener("click",()=>{
-  $("#mask").classList.add("on");
-  $("#mBar").style.width="0%";
-  $("#mSteps").innerHTML=STEPS.map((s,i)=>`<div data-i="${i}"><i></i>${esc(s)}</div>`).join("");
-  const rows=[...$("#mSteps").children];
-  let i=0;
-  rows[0].classList.add("now");
-  const t=setInterval(()=>{
-    rows[i].classList.remove("now");rows[i].classList.add("done");
-    i++;
-    $("#mBar").style.width=Math.round(i/STEPS.length*100)+"%";
-    if(i>=rows.length){
-      clearInterval(t);
-      $("#mTitle").textContent="已是最新";
-      $("#mSteps").insertAdjacentHTML("beforeend",`<div class="done" style="margin-top:4px"><i></i>${STAT.docs} 份文件 · ${STAT.chunks} 段原文，无需更新</div>`);
-      loadStatus();
-      return;
-    }
-    rows[i].classList.add("now");
-  },620);
+/* ---------- 更新文件库：真的重新读盘、重建索引 ----------
+   原来这里只有四段 CSS 动画：每 620ms 把一条步骤标成完成，走完 2.5 秒
+   印一句写死的「已是最新」，从头到尾没发过一个请求。 */
+$("#updateBtn").addEventListener("click",async()=>{
+  const mask=$("#mask"),bar=$("#mBar"),steps=$("#mSteps"),btn=$("#updateBtn");
+  mask.classList.add("on");
+  bar.style.background="";bar.style.width="12%";
+  $("#mTitle").textContent="正在更新";
+  steps.innerHTML=`<div class="now"><i></i>读取 corpus 下的三份语料…</div>`;
+  btn.disabled=true;
+  let info=null,ok=false;
+  try{
+    const r=await fetch("/api/rebuild",{method:"POST"});
+    info=await r.json();ok=r.ok&&info.ok;
+  }catch(e){}
+  btn.disabled=false;
+  if(!ok){
+    bar.style.background="var(--red)";bar.style.width="100%";
+    $("#mTitle").textContent="更新失败";
+    steps.innerHTML=`<div class="bad"><i></i>没能重建索引${info&&info.error?"："+esc(info.error):"，服务端没有响应"}</div>`;
+    return;
+  }
+  bar.style.width="100%";
+  const changed=(info.added_docs>0)||(info.removed_docs>0)||(info.added_chunks!==0);
+  const bits=[];
+  if(info.added_docs>0)bits.push(`新增 ${info.added_docs} 份文件`);
+  if(info.added_chunks>0)bits.push(`${info.added_chunks} 段原文`);
+  if(info.removed_docs>0)bits.push(`移除 ${info.removed_docs} 份`);
+  if(info.added_chunks<0)bits.push(`减少 ${-info.added_chunks} 段原文`);
+  $("#mTitle").textContent=changed?"已更新":"没有发现新文件";
+  steps.innerHTML=
+    `<div class="done"><i></i>读到 ${info.docs} 份文件 · ${info.chunks} 段原文</div>`+
+    `<div class="done"><i></i>重建检索索引，用时 ${info.ms} 毫秒</div>`+
+    `<div class="done"><i></i>${changed?bits.join("，"):"与上次一致，无需更新"}</div>`;
+  loadStatus();
 });
 $("#mClose").addEventListener("click",()=>{
   $("#mask").classList.remove("on");
   $("#mTitle").textContent="更新文件库";
+  $("#mBar").style.background="";$("#mBar").style.width="0%";
 });
 
 /* ---------- 启动 ---------- */
