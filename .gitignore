@@ -1,13 +1,7 @@
 # ---- 密钥：绝对不能提交 ----
 config.json
 
-# ---- 语料：学校官网抓取内容，仅本地自用，不随仓库分发 ----
-corpus/chunks.jsonl
-corpus/docs_final.jsonl
-corpus/web_chunks.jsonl
-corpus/web_seen.json
-corpus/dedup_report.json
-corpus/stats.json
+# ---- 语料：已入库，clone 后可直接运行（约 7.7MB）。全部来自学校官网公开文件 ----
 
 # ---- 地图底图：高德瓦片拼接，再分发不合规，请自行准备 ----
 web/assets/campus.webp
